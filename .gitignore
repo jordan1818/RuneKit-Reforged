@@ -1,5 +1,6 @@
 build/
 dist/
+.venv/
 runekit/image/format.c
 runekit/image/format.*.*
 setup.py
@@ -11,3 +12,4 @@ runekit/_resources.py
 upstream-runekit/
 Prompts/
 .claude/
+spike/wayland/protocols/

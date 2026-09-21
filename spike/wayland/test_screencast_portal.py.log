@@ -1,6 +1,19 @@
 Calling CreateSession...
-RESULT: CreateSession call failed: g-dbus-error-quark: GDBus.Error:org.freedesktop.DBus.Error.NoReply: Remote peer disconnected (4)
-=> NO-GO: ScreenCast portal not implemented by this backend.
+Session created: /org/freedesktop/portal/desktop/session/1_310/runekit_spike_session_fddb511b1292
+Using persisted restore_token (picker should NOT prompt)...
+Calling SelectSources (WINDOW source type)...
+SelectSources succeeded.
+Calling Start (triggers the compositor window picker if no restore_token)...
+RESULT: Start succeeded. 1 stream(s) selected:
+  - node_id=100 props={'source_type': 2}
+Persisted new restore_token to /var/home/JDan/Projects/Python/RuneKit-Reforged/spike/wayland/.screencast_restore_token.json
+Calling OpenPipeWireRemote...
+RESULT: got PipeWire fd=8 for the node_id(s) printed above.
+=> GO: ScreenCast WINDOW-picker + OpenPipeWireRemote flow works via PyGObject/GDBus.
+This confirms no pywayland/plasmawindowmanagement dependency is needed for
+window discovery (Phase 3 can rely on this picker + caching the selection).
+See test_screencast_full_pipeline.py to feed this fd/node_id into a live Gst pipeline.
+Session closed.
 
 Reminder: run with --cleanup to reset the persisted restore_token,
 and `pip uninstall PyGObject` to remove the spike-only dependency.

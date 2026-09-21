@@ -1,0 +1,6 @@
+Calling CreateSession...
+RESULT: CreateSession call failed: g-dbus-error-quark: GDBus.Error:org.freedesktop.DBus.Error.NoReply: Remote peer disconnected (4)
+=> NO-GO: ScreenCast portal not implemented by this backend.
+
+Reminder: run with --cleanup to reset the persisted restore_token,
+and `pip uninstall PyGObject` to remove the spike-only dependency.

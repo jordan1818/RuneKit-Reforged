@@ -1,0 +1,32 @@
+Calling CreateSession...
+Session created: /org/freedesktop/portal/desktop/session/1_324/runekit_spike_session_7328c8fae2d2
+Using persisted restore_token (picker should NOT prompt)...
+Calling SelectSources (WINDOW source type)...
+Calling Start (triggers the compositor window picker if no restore_token)...
+Selected stream node_id=90
+Persisted new restore_token to /var/home/JDan/Projects/Python/RuneKit-Reforged/spike/wayland/.screencast_restore_token.json
+Calling OpenPipeWireRemote...
+Got PipeWire fd=8 for node_id=90
+Building Gst pipeline and pulling 5 frame(s)...
+Gst pipeline: pipewiresrc fd=8 path=90 ! videoconvert ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true
+Pipeline state change result: (<StateChangeReturn.SUCCESS: 1>, state=<State.PLAYING: 4>, pending=<State.VOID_PENDING: 0>)
+Pulled frame 0: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 1: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 2: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 3: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 4: shape=(1394, 2560, 4) dtype=uint8
+Session closed.
+Saved /tmp/runekit-spike-frames/frame_000.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-spike-frames/frame_001.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-spike-frames/frame_002.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-spike-frames/frame_003.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-spike-frames/frame_004.png (shape=(1394, 2560, 4))
+
+RESULT: captured 5 live frame(s) end-to-end. Frames saved to /tmp/runekit-spike-frames
+Open the PNGs and confirm they show the picked window's live contents.
+=> GO: full ScreenCast portal (WINDOW picker) + PyGObject/Gst PipeWire capture
+pipeline works together. This validates dropping pywayland/plasmawindowmanagement
+and dbus-next/pydbus in favour of PyGObject alone for Phase 2/3 of ROADMAP.md.
+
+Reminder: run with --cleanup to reset the persisted restore_token,
+and `pip uninstall PyGObject` to remove the spike-only dependency.

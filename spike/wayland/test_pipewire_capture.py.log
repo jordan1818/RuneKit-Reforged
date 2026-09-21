@@ -1,0 +1,9 @@
+Gst pipeline: videotestsrc pattern=smpte num-buffers=5 ! video/x-raw,format=BGRA,width=320,height=240 ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true
+Pipeline state change result: (<StateChangeReturn.SUCCESS: 1>, state=<State.PLAYING: 4>, pending=<State.VOID_PENDING: 0>)
+Pulled frame 0: shape=(240, 320, 4) dtype=uint8
+Pulled frame 1: shape=(240, 320, 4) dtype=uint8
+RESULT: no sample received for frame 2 within 10s
+RESULT: self-test produced 2 frame(s). Last frame saved to /tmp/runekit-spike-selftest.png
+Open that PNG and confirm it shows an SMPTE colour-bar test pattern.
+=> GO (partial): Gst/GstApp appsink pull + BGRA numpy conversion works.
+Next: run test_screencast_full_pipeline.py to validate the real pipewiresrc path.

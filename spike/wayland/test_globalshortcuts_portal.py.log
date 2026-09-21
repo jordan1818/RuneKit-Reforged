@@ -1,0 +1,18 @@
+Calling CreateSession...
+Session created: /org/freedesktop/portal/desktop/session/1_328/runekit_spike_session_7066815b7739
+Calling BindShortcuts (requesting id='runekit-spike-alt1')...
+A KDE dialog may appear asking you to assign a key combo -- pick Alt+1 if possible.
+RESULT: BindShortcuts succeeded. Bound shortcut(s): [('runekit-spike-alt1', {'description': 'RuneKit Reforged spike: Alt+1', 'trigger_description': 'Alt+1'})]
+
+Listening for 'Activated' signals for 20 seconds. Press your bound key now...
+Activated: shortcut_id='runekit-spike-alt1' timestamp=0 (count=1)
+Activated: shortcut_id='runekit-spike-alt1' timestamp=0 (count=2)
+Activated: shortcut_id='runekit-spike-alt1' timestamp=0 (count=3)
+Activated: shortcut_id='runekit-spike-alt1' timestamp=0 (count=4)
+Activated: shortcut_id='runekit-spike-alt1' timestamp=0 (count=5)
+
+RESULT: received 5 Activated signal(s).
+=> GO: GlobalShortcuts portal works via PyGObject/GDBus for the Alt+1 hotkey (Phase 4).
+Session closed.
+
+Reminder: `pip uninstall PyGObject` to remove the spike-only dependency when done.

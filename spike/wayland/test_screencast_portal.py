@@ -120,6 +120,17 @@ class PortalRequest:
         *head, options = arg_tuple
         options = dict(options)
         options["handle_token"] = GLib.Variant("s", token)
+
+        # CreateSession also requires session_handle_token: without it, some
+        # backends (observed on xdg-desktop-portal-kde) fail to construct the
+        # Session object and the whole D-Bus call dies mid-flight, which the
+        # client sees as "GDBus.Error:org.freedesktop.DBus.Error.NoReply:
+        # Remote peer disconnected" rather than a clean error Response.
+        if method_name == "CreateSession":
+            options["session_handle_token"] = GLib.Variant(
+                "s", "runekit_spike_session_" + secrets.token_hex(6)
+            )
+
         arg_tuple = tuple(head) + (options,)
 
         self._sub_id = self.bus.signal_subscribe(

@@ -1,0 +1,18 @@
+Opening ScreenCast portal session (production ScreenCastSession)...
+Got PipeWire fd=8 node_id=97
+Starting PipeWireCapture pipeline...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 149, in <module>
+    main()
+    ~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 145, in main
+    run(count=args.count, out_dir=args.out_dir)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 97, in run
+    frame = capture.get_latest_frame(timeout_sec=10.0)
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/capture.py", line 105, in get_latest_frame
+    sample = self._sink.try_pull_sample(int(timeout_sec * Gst.SECOND))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'GstAppSink' object has no attribute 'try_pull_sample'

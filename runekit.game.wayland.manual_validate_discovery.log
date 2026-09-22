@@ -1,0 +1,12 @@
+Stream properties did not include a size; WaylandGameInstance.get_position() will fall back to (0, 0, 0, 0)
+/var/home/ME/Projects/Python/RuneKit-Reforged/runekit/game/wayland/instance.py:165: RuntimeWarning: libpyside: Failed to disconnect (<bound method WaylandGameInstance._on_application_state_changed of <runekit.game.wayland.instance.WaylandGameInstance(0x55aeb2ba1b90) at 0x7f184360b8c0>>) from signal "applicationStateChanged(Qt::ApplicationState)".
+  app.applicationStateChanged.disconnect(self._on_application_state_changed)
+Calling get_instances() (may show the KWin window picker)...
+Discovered instance wid=1
+get_position() -> x=0 y=0 w=0 h=0
+get_scaling() -> 1.0
+is_focused() -> False
+get_active_instance() -> None
+
+RESULT: discovery, static geometry, and focus queries all ran without error.
+=> Report back GO/NO-GO so ROADMAP.md Phase 3 can be marked complete.

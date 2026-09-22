@@ -258,9 +258,16 @@ class ScreenCastSession:
             self.logger.debug("Stream negotiated size: %s", self.stream_size)
         else:
             self.stream_size = None
-            self.logger.warning(
-                "Stream properties did not include a size; "
-                "WaylandGameInstance.get_position() will fall back to (0, 0, 0, 0)"
+            # Observed in practice: xdg-desktop-portal-kde does not always
+            # populate the (optional, per the portal spec) "size" property
+            # for WINDOW-type streams -- it's primarily meant for MONITOR
+            # streams. WaylandGameInstance falls back to deriving the size
+            # from the first real captured PipeWire frame instead (see
+            # WaylandGameInstance._probe_frame_size). See ROADMAP.md Phase 3.
+            self.logger.info(
+                "Stream properties did not include a size (this is common "
+                "for WINDOW-type streams on KWin); size will be derived "
+                "from the first captured frame instead"
             )
 
         self.logger.debug("Calling OpenPipeWireRemote")

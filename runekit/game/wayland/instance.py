@@ -59,13 +59,21 @@ class WaylandGameInstance(GameInstance):
         self._capture_pipeline: Optional[WaylandCapturePipeline] = None
         self._game_last_grab = 0.0
         self._game_last_image = None
+        self._stopped = False
 
-        # Cached, static geometry from the stream's negotiated size at
-        # session-start time. There is no on-screen x/y for WINDOW-type
-        # ScreenCast streams (see ScreenCastSession.stream_size), so this
-        # is anchored at (0, 0) -- a known Wayland limitation, not a bug.
-        width, height = session.stream_size or (0, 0)
-        self._position = QRect(0, 0, width, height)
+        # Cached, static geometry. There is no on-screen x/y for WINDOW-type
+        # ScreenCast streams, so this is always anchored at (0, 0) -- a
+        # known Wayland limitation, not a bug. If the portal supplied a
+        # stream size up front, use it; otherwise (observed in practice:
+        # xdg-desktop-portal-kde often omits "size" for WINDOW streams --
+        # see portal.py) leave it unresolved and derive it lazily from the
+        # first captured PipeWire frame in get_position() -- see
+        # ROADMAP.md Phase 3.
+        if session.stream_size:
+            width, height = session.stream_size
+            self._position: Optional[QRect] = QRect(0, 0, width, height)
+        else:
+            self._position = None
 
         self._is_focused = (
             QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive
@@ -75,7 +83,52 @@ class WaylandGameInstance(GameInstance):
         )
 
     def get_position(self) -> QRect:
-        return self._position
+        if self._position is None:
+            self._resolve_position_from_frame()
+
+        return self._position or QRect(0, 0, 0, 0)
+
+    def _resolve_position_from_frame(self):
+        """Derive the static (0, 0, w, h) position from the first captured
+        PipeWire frame, when the portal did not supply a stream "size"
+        property up front (observed in practice with WINDOW-type streams
+        on xdg-desktop-portal-kde -- see portal.py/ScreenCastSession).
+
+        This starts the capture pipeline early (normally lazy, on first
+        grab_game() call) so a position is available before any frame has
+        actually been requested by a caller. Safe to call repeatedly; it
+        is a no-op once resolved.
+        """
+        try:
+            self._ensure_capture_started()
+        except Exception:
+            self.logger.warning("Could not start capture pipeline", exc_info=True)
+            return
+
+        # The capture pipeline starts asynchronously on a background
+        # QThread (portal D-Bus round trip + Gst pipeline startup), so the
+        # first frame is not available immediately -- poll briefly rather
+        # than giving up after a single check.
+        frame = None
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            frame = self._capture_pipeline.get_latest_frame()
+            if frame is not None:
+                break
+            if self._capture_pipeline.last_error:
+                self.logger.warning(
+                    "Cannot derive window size: capture failed: %s",
+                    self._capture_pipeline.last_error,
+                )
+                return
+            time.sleep(0.1)
+
+        if frame is not None:
+            height, width = frame.shape[0], frame.shape[1]
+            self._position = QRect(0, 0, width, height)
+            self.logger.debug("Resolved window size from captured frame: %dx%d", width, height)
+        else:
+            self.logger.warning("Timed out waiting for a frame to derive window size")
 
     def get_scaling(self) -> float:
         # No QWindow handle exists for a portal-picked window (unlike
@@ -152,7 +205,17 @@ class WaylandGameInstance(GameInstance):
         started and never took ownership of closing the session -- see
         WaylandCaptureWorker.run()), close the ScreenCastSession directly
         here so it isn't left open/orphaned.
+
+        Idempotent: safe to call multiple times (e.g. once explicitly and
+        again from __del__ at interpreter shutdown). PySide6 reports a
+        failed disconnect() via a RuntimeWarning rather than a catchable
+        exception, so this guards against double-disconnecting with an
+        explicit flag instead of relying on try/except.
         """
+        if self._stopped:
+            return
+        self._stopped = True
+
         if self._capture_pipeline is not None:
             self._capture_pipeline.stop()
             self._capture_pipeline = None
@@ -161,10 +224,7 @@ class WaylandGameInstance(GameInstance):
 
         app = QGuiApplication.instance()
         if app is not None:
-            try:
-                app.applicationStateChanged.disconnect(self._on_application_state_changed)
-            except (RuntimeError, TypeError):
-                pass
+            app.applicationStateChanged.disconnect(self._on_application_state_changed)
 
     def __del__(self):
         self.stop()

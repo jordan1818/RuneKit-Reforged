@@ -1,18 +1,17 @@
 Opening ScreenCast portal session (production ScreenCastSession)...
-Got PipeWire fd=8 node_id=97
+Got PipeWire fd=8 node_id=64
 Starting PipeWireCapture pipeline...
-Traceback (most recent call last):
-  File "<frozen runpy>", line 203, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 149, in <module>
-    main()
-    ~~~~^^
-  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 145, in main
-    run(count=args.count, out_dir=args.out_dir)
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_capture.py", line 97, in run
-    frame = capture.get_latest_frame(timeout_sec=10.0)
-  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/capture.py", line 105, in get_latest_frame
-    sample = self._sink.try_pull_sample(int(timeout_sec * Gst.SECOND))
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'GstAppSink' object has no attribute 'try_pull_sample'
+Pulled frame 0: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 1: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 2: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 3: shape=(1394, 2560, 4) dtype=uint8
+Pulled frame 4: shape=(1394, 2560, 4) dtype=uint8
+Saved /tmp/runekit-phase2-frames/phase2_frame_000.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-phase2-frames/phase2_frame_001.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-phase2-frames/phase2_frame_002.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-phase2-frames/phase2_frame_003.png (shape=(1394, 2560, 4))
+Saved /tmp/runekit-phase2-frames/phase2_frame_004.png (shape=(1394, 2560, 4))
+
+RESULT: captured 5 live frame(s) via the production Phase 2 code path.
+Open the PNGs in /tmp/runekit-phase2-frames and confirm they show the picked window's live contents.
+=> Report back GO/NO-GO so ROADMAP.md Phase 2 can be marked complete.

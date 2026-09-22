@@ -70,7 +70,13 @@ class PipeWireCapture:
 
         gi.require_version("Gst", "1.0")
         gi.require_version("GstApp", "1.0")
-        from gi.repository import Gst
+        # GstApp must actually be imported (not just require_version'd) for
+        # PyGObject to attach the AppSink overrides (e.g. try_pull_sample)
+        # to the appsink element returned by pipeline.get_by_name() below --
+        # omitting this import causes
+        # "AttributeError: 'GstAppSink' object has no attribute
+        # 'try_pull_sample'" even though the pipeline itself builds fine.
+        from gi.repository import Gst, GstApp  # noqa: F401
 
         Gst.init(None)
 

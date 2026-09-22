@@ -131,23 +131,28 @@ class PipeWireCapture:
 
 
 class WaylandCaptureWorker(QObject):
-    """Runs the ScreenCast portal session + PipeWire pull loop on a
-    background thread.
+    """Runs the PipeWire pull loop on a background thread, consuming an
+    already-opened ScreenCastSession.
 
-    The blocking portal D-Bus round trips (including the KWin window-picker
-    prompt) and the Gst appsink pulls would otherwise stall Qt's own event
-    loop, so this mirrors the QThread worker pattern already used by
-    X11GameManager's event_thread/X11EventWorker
-    (see runekit/game/x11/manager.py) rather than introducing a new pattern.
+    As of ROADMAP.md Phase 3, the ScreenCastSession is opened once by
+    WaylandGameManager during window discovery (so the KWin window-picker
+    prompt happens as part of discovery, not lazily on first grab_game()
+    call), and the resulting session is handed to this worker to consume.
+    This worker owns closing the session once capture stops.
+
+    The Gst appsink pulls would otherwise stall Qt's own event loop, so this
+    mirrors the QThread worker pattern already used by X11GameManager's
+    event_thread/X11EventWorker (see runekit/game/x11/manager.py) rather
+    than introducing a new pattern.
     """
 
     frame_ready = Signal()
     error = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, session: ScreenCastSession, parent=None):
         super().__init__(parent)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self._session = ScreenCastSession()
+        self._session = session
         self._capture = PipeWireCapture()
         self._lock = threading.Lock()
         self._latest_frame: Optional[np.ndarray] = None
@@ -156,8 +161,7 @@ class WaylandCaptureWorker(QObject):
     @Slot()
     def run(self):
         try:
-            fd, node_id = self._session.open()
-            self._capture.start(fd, node_id)
+            self._capture.start(self._session.pipewire_fd, self._session.node_id)
         except Exception as exc:
             self.logger.error("Failed to start Wayland capture pipeline", exc_info=True)
             self.error.emit(str(exc))
@@ -190,18 +194,23 @@ class WaylandCapturePipeline(QObject):
     """Owns the background QThread + WaylandCaptureWorker pair for a single
     WaylandGameInstance's capture session.
 
+    Takes an already-opened ScreenCastSession (opened synchronously by
+    WaylandGameManager during window discovery, per ROADMAP.md Phase 3) so
+    the KWin window-picker prompt happens once, at discovery time, rather
+    than being deferred to the first grab_game() call.
+
     Usage mirrors X11GameManager's event_thread setup: construct, call
     start() once, poll get_latest_frame() from the Qt (main) thread, and
     call stop() on teardown.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, session: ScreenCastSession, parent=None):
         super().__init__(parent)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.last_error: Optional[str] = None
 
         self.thread = QThread(self)
-        self.worker = WaylandCaptureWorker()
+        self.worker = WaylandCaptureWorker(session)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.thread.finished.connect(self.worker.deleteLater)

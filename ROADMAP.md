@@ -3,6 +3,8 @@
 Status: Phase 0 complete (all spikes GO). Phase 1 complete (session
 detection & scaffolding implemented). Phase 2 complete (screen capture
 pipeline implemented and validated on a real KDE Plasma Wayland machine).
+Phase 3 implemented (window discovery, static geometry, best-effort focus
+tracking) but pending validation on a real KDE Plasma Wayland machine.
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -192,24 +194,61 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   errors after the `GstApp` fix above, and the saved PNGs were opened and
   visually confirmed to show the picked window's live contents.
 
-### Phase 3 — Window discovery, geometry, focus tracking
+### Phase 3 — Window discovery, geometry, focus tracking ⏳ IMPLEMENTED, pending real-machine validation
 
 - Window discovery uses the `ScreenCast` portal's own `WINDOW`-source picker
-  exclusively (no `plasmawindowmanagement`/`pywayland`): prompt via
-  `SelectSources(types=WINDOW)` + `Start()` on first launch, then persist
-  and reuse the `restore_token` (per Phase 2) so subsequent launches reuse
-  the same window without re-prompting. Provide a UI action to re-pick the
-  window (discarding the stored `restore_token`) if the user needs to
-  target a different game window/instance.
-- Accept the resulting limitation: there is no live compositor-pushed
-  `positionChanged`/`focusChanged` event source. Implement `get_position`
-  and `get_scaling` from the stream's negotiated size/metadata at
-  session-start time (static until the user re-picks); implement
-  `is_focused` on a best-effort basis (e.g. treating the instance as
-  focused whenever the RuneKit process itself has input focus, since an
-  unprivileged Wayland client cannot query another window's activation
-  state without a privileged protocol). Document this as a known Wayland
-  limitation rather than attempting to fully replicate X11 behavior.
+  exclusively (no `plasmawindowmanagement`/`pywayland`): `WaylandGameManager`
+  (`runekit/game/wayland/manager.py`) lazily opens a `ScreenCastSession`
+  (`SelectSources(types=WINDOW)` + `Start()`) the first time
+  `get_instances()`/`get_active_instance()` is called, then persists and
+  reuses the `restore_token` (per Phase 2) so subsequent launches reuse the
+  same window without re-prompting. The opened session's fd/node_id are
+  handed directly to the resulting `WaylandGameInstance`
+  (`runekit/game/wayland/instance.py`), which passes them into
+  `WaylandCapturePipeline`/`WaylandCaptureWorker`
+  (`runekit/game/wayland/capture.py`) — so the picker now runs once, at
+  discovery time, instead of being deferred to the first `grab_game()` call
+  as it was in the Phase 2 implementation. A `repick_window()` method
+  (`Host.repick_window()` / a conditional "Re-pick game window" tray menu
+  action in `runekit/ui/tray.py`, shown only when
+  `Host.supports_repick_window()` is true) discards the stored
+  `restore_token` and the current instance (emitting `instance_removed`),
+  forcing the picker again on the next discovery call.
+- `ScreenCastSession.open()` (`runekit/game/wayland/portal.py`) now also
+  parses the `size (ii)` property out of the picked stream's properties
+  vardict (`streams[0][1]`) into `ScreenCastSession.stream_size`. Per the
+  upstream `org.freedesktop.impl.portal.ScreenCast` interface docs, a
+  stream's `position` property is documented as available for monitor
+  streams only, so a `WINDOW`-type stream (used exclusively by this
+  backend) never yields an on-screen x/y — only a size. This confirms the
+  limitation anticipated below.
+- Accepted the resulting limitation: there is no live compositor-pushed
+  `positionChanged`/`focusChanged` event source. `get_position()` returns a
+  static `QRect(0, 0, width, height)` built from `stream_size` at
+  session-start time (the `(0, 0)` origin is a known limitation, documented
+  in code, not a bug — anchoring elsewhere would be equally arbitrary
+  without real compositor coordinates); `get_scaling()` falls back to
+  `QGuiApplication.primaryScreen().devicePixelRatio()` (no `QWindow` handle
+  exists for a portal-picked window, unlike X11's `QWindow.fromWinId`);
+  `is_focused()` is best-effort, treating the instance as focused whenever
+  RuneKit's own `QGuiApplication.applicationState()` is `ApplicationActive`
+  (wired via `applicationStateChanged` to still emit the existing
+  `focusChanged` Qt signal, so `overlay.py`/`GameManager.get_active_instance()`
+  keep working unchanged) — since an unprivileged Wayland client cannot
+  query another window's activation state without a privileged protocol.
+  This is a known Wayland limitation rather than an attempt to fully
+  replicate X11 behavior.
+- **Not yet validated on a real KDE Plasma Wayland machine.** A manual
+  validation script (`runekit/game/wayland/manual_validate_discovery.py`,
+  mirroring Phase 2's `manual_validate_capture.py` since this project has
+  no automated test suite) exercises `WaylandGameManager.get_instances()`/
+  `get_active_instance()` and prints the resulting `get_position()`/
+  `get_scaling()`/`is_focused()` values, plus a `--repick` flag to test
+  `repick_window()`. Logic was smoke-tested locally (off-Linux) with the
+  portal D-Bus calls mocked out; this phase should be marked fully
+  complete only after that script is run and visually confirmed on the
+  reference Bazzite/KDE Plasma Wayland machine (picker prompts once,
+  `restore_token` persists across runs, `--repick` forces a re-prompt).
 
 ### Phase 4 — Global hotkey (Alt+1)
 

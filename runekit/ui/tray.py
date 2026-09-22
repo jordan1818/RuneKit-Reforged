@@ -32,6 +32,11 @@ class TrayIcon(QSystemTrayIcon):
         self._setup_app_menu("", self.menu)
 
         self.menu.addSeparator()
+
+        if self.host.supports_repick_window():
+            self.menu_repick_window = self.menu.addAction("Re-pick game window")
+            self.menu_repick_window.triggered.connect(self.host.repick_window)
+
         self.menu_settings = self.menu.addAction("Settings")
         self.menu_settings.triggered.connect(self.on_settings)
         self.menu.addAction(

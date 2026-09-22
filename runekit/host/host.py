@@ -103,6 +103,19 @@ class Host:
         self.setting_dialog.show()
         self.setting_dialog.raise_()
 
+    def supports_repick_window(self) -> bool:
+        """Whether the current GameManager supports re-picking the game
+        window (currently only WaylandGameManager -- see ROADMAP.md
+        Phase 3). Used to conditionally show a tray menu action."""
+        return hasattr(self.manager, "repick_window")
+
+    @Slot()
+    def repick_window(self):
+        """Ask the GameManager to forget the currently picked window and
+        prompt again (Wayland only -- see ROADMAP.md Phase 3)."""
+        if self.supports_repick_window():
+            self.manager.repick_window()
+
     @Slot()
     def on_game_quit(self, instance: "GameInstance"):
         self.logger.info("Game instance is closing")

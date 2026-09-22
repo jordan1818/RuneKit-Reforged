@@ -171,6 +171,13 @@ class ScreenCastSession:
         self._session_handle: Optional[str] = None
         self.node_id: Optional[int] = None
         self.pipewire_fd: Optional[int] = None
+        # (width, height) as negotiated by the compositor for the picked
+        # WINDOW stream, from the "size" key of the stream's properties
+        # vardict (see Start()'s docs). Per the ScreenCast portal spec, the
+        # "position" property is only available for MONITOR-type streams,
+        # so a WINDOW stream (used exclusively by this backend) never
+        # yields an on-screen x/y -- only a size. See ROADMAP.md Phase 3.
+        self.stream_size: Optional[Tuple[int, int]] = None
 
     def open(self, use_restore_token: bool = True) -> Tuple[int, int]:
         """Run the portal flow, returning (pipewire_fd, node_id).
@@ -244,7 +251,17 @@ class ScreenCastSession:
             save_restore_token(new_restore_token)
             self.logger.debug("Persisted new restore_token")
 
-        node_id = streams[0][0]
+        node_id, stream_props = streams[0]
+        raw_size = stream_props.get("size")
+        if raw_size:
+            self.stream_size = (int(raw_size[0]), int(raw_size[1]))
+            self.logger.debug("Stream negotiated size: %s", self.stream_size)
+        else:
+            self.stream_size = None
+            self.logger.warning(
+                "Stream properties did not include a size; "
+                "WaylandGameInstance.get_position() will fall back to (0, 0, 0, 0)"
+            )
 
         self.logger.debug("Calling OpenPipeWireRemote")
         reply, fd_list = proxy.call_with_unix_fd_list_sync(

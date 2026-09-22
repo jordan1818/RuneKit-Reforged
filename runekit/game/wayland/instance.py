@@ -2,12 +2,14 @@ import logging
 import time
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QGraphicsItem
 
 from runekit.image.np_utils import np_crop
 from ..instance import GameInstance, ImageType
 from .capture import WaylandCapturePipeline
+from .portal import ScreenCastSession
 
 if TYPE_CHECKING:
     from .manager import WaylandGameManager
@@ -21,50 +23,97 @@ class WaylandGameInstance(GameInstance):
     pipeline (see .portal/.capture), run on a background QThread so the
     blocking D-Bus/portal-picker/appsink calls don't stall Qt's event loop.
 
-    Window discovery, geometry/focus tracking, the global hotkey, and the
-    overlay are implemented in later phases -- see ROADMAP.md Phases 3-5.
+    Window discovery (ROADMAP.md Phase 3) opens the ScreenCastSession
+    synchronously in WaylandGameManager and hands it to this instance, so
+    the KWin window-picker prompt happens once at discovery time. Geometry
+    (get_position/get_scaling) and focus tracking (is_focused) are
+    best-effort/static, per the Phase 3 plan: the ScreenCast portal's
+    WINDOW-type streams do not expose an on-screen position (only a
+    negotiated size -- see portal.py's ScreenCastSession.stream_size), and
+    there is no live compositor-pushed geometry/focus-change event source
+    available without plasmawindowmanagement (dropped from this project's
+    plan -- see ROADMAP.md Feasibility notes/Non-goals).
+
+    The global hotkey and the overlay are implemented in later phases --
+    see ROADMAP.md Phases 4-5.
     """
 
     overlay: QGraphicsItem
     refresh_rate = 100
 
-    def __init__(self, manager: "WaylandGameManager", **kwargs):
+    def __init__(
+        self,
+        manager: "WaylandGameManager",
+        wid: int,
+        session: ScreenCastSession,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.manager = manager
+        # Synthetic id (not a real X11-style window id) used to key this
+        # instance the same way DesktopWideOverlay/GameManager key X11/
+        # Quartz instances by `wid` -- see ROADMAP.md Phase 3.
+        self.wid = wid
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self._session = session
         self._capture_pipeline: Optional[WaylandCapturePipeline] = None
         self._game_last_grab = 0.0
         self._game_last_image = None
 
-    def get_position(self) -> QRect:
-        raise NotImplementedError(
-            "Wayland window geometry not implemented yet (see ROADMAP.md Phase 3)"
+        # Cached, static geometry from the stream's negotiated size at
+        # session-start time. There is no on-screen x/y for WINDOW-type
+        # ScreenCast streams (see ScreenCastSession.stream_size), so this
+        # is anchored at (0, 0) -- a known Wayland limitation, not a bug.
+        width, height = session.stream_size or (0, 0)
+        self._position = QRect(0, 0, width, height)
+
+        self._is_focused = (
+            QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive
         )
+        QGuiApplication.instance().applicationStateChanged.connect(
+            self._on_application_state_changed
+        )
+
+    def get_position(self) -> QRect:
+        return self._position
 
     def get_scaling(self) -> float:
-        raise NotImplementedError(
-            "Wayland scaling detection not implemented yet (see ROADMAP.md Phase 3)"
-        )
+        # No QWindow handle exists for a portal-picked window (unlike
+        # X11's QWindow.fromWinId), so fall back to the scaling of
+        # whichever screen RuneKit's own windows are on. Best-effort, per
+        # ROADMAP.md Phase 3.
+        screen = QGuiApplication.primaryScreen()
+        return screen.devicePixelRatio() if screen else 1.0
 
     def is_focused(self) -> bool:
-        raise NotImplementedError(
-            "Wayland focus tracking not implemented yet (see ROADMAP.md Phase 3)"
-        )
+        return self._is_focused
+
+    def _on_application_state_changed(self, state):
+        # Best-effort focus tracking: an unprivileged Wayland client cannot
+        # query another window's activation state without a privileged
+        # protocol, so treat this instance as focused whenever RuneKit
+        # itself has input focus -- see ROADMAP.md Phase 3.
+        focused = state == Qt.ApplicationState.ApplicationActive
+        if focused != self._is_focused:
+            self._is_focused = focused
+            self.focusChanged.emit(focused)
 
     def get_world(self) -> Optional[int]:
         return None
 
     def _ensure_capture_started(self):
         if self._capture_pipeline is None:
-            self._capture_pipeline = WaylandCapturePipeline()
+            self._capture_pipeline = WaylandCapturePipeline(self._session)
             self._capture_pipeline.start()
 
     def grab_game(self) -> ImageType:
         """Return the most recent captured frame as a BGRA32 numpy array.
 
         Implements ROADMAP.md Phase 2: the frame comes from a background
-        ScreenCast portal + PipeWire/Gst pipeline (see .capture), lazily
-        started on first call (which may show KWin's window picker once).
+        PipeWire/Gst pipeline (see .capture) consuming the ScreenCastSession
+        opened during discovery (ROADMAP.md Phase 3), lazily started on
+        first call. The KWin window picker (if shown) happens during
+        discovery, not here.
         """
         if (time.monotonic() - self._game_last_grab) * 1000 < self.refresh_rate:
             if self._game_last_image is not None:
@@ -97,10 +146,25 @@ class WaylandGameInstance(GameInstance):
         return np_crop(image, x, y, w, h)
 
     def stop(self):
-        """Stop the background capture pipeline, if running."""
+        """Stop the background capture pipeline, if running.
+
+        If grab_game() was never called (so the capture pipeline never
+        started and never took ownership of closing the session -- see
+        WaylandCaptureWorker.run()), close the ScreenCastSession directly
+        here so it isn't left open/orphaned.
+        """
         if self._capture_pipeline is not None:
             self._capture_pipeline.stop()
             self._capture_pipeline = None
+        else:
+            self._session.close()
+
+        app = QGuiApplication.instance()
+        if app is not None:
+            try:
+                app.applicationStateChanged.disconnect(self._on_application_state_changed)
+            except (RuntimeError, TypeError):
+                pass
 
     def __del__(self):
         self.stop()

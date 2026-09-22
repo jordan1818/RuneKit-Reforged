@@ -1,6 +1,7 @@
 # Wayland Support Roadmap (Plan A: Wayland + X11)
 
-Status: Phase 0 complete (all spikes GO) — implementation not started
+Status: Phase 0 complete (all spikes GO). Phase 1 complete (session
+detection & scaffolding implemented).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -114,14 +115,35 @@ dependency** for Phases 2–4 (`Gio` for all portal D-Bus calls, `Gst`/
 `pydbus`. Window discovery (Phase 3) is based entirely on the `ScreenCast`
 portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
 
-### Phase 1 — Session detection & scaffolding
+### Phase 1 — Session detection & scaffolding ✅ COMPLETE
 
-- Extend `runekit/game/__init__.py::get_platform_manager()` to detect a
-  Wayland session (`XDG_SESSION_TYPE=wayland` / `WAYLAND_DISPLAY` set) and
-  route to a new `WaylandGameManager`, falling back to `X11GameManager` for
-  X11/XWayland sessions.
-- Scaffold `runekit/game/wayland/` package with stub `GameManager` /
-  `GameInstance` implementations satisfying the existing ABCs.
+- Extended `runekit/game/__init__.py::get_platform_manager()` with a
+  `_is_wayland_session()` helper that detects a Wayland session
+  (`XDG_SESSION_TYPE=wayland` / `WAYLAND_DISPLAY` set) and routes to a new
+  `WaylandGameManager`, falling back to `X11GameManager` for X11/XWayland
+  sessions (unchanged). The `darwin` → `QuartzGameManager` branch is
+  untouched. No new dependency was needed for this phase.
+- Scaffolded the `runekit/game/wayland/` package
+  (`runekit/game/wayland/manager.py`, `runekit/game/wayland/instance.py`)
+  with stub `WaylandGameManager`/`WaylandGameInstance` implementations
+  satisfying the existing `GameManager`/`GameInstance` ABCs.
+  `WaylandGameManager` currently reports no instances and logs a warning
+  that Wayland support is a work in progress; `WaylandGameInstance` raises
+  `NotImplementedError` (pointing at the relevant later phase) for
+  geometry/scaling/focus/capture/overlay methods, to be implemented in
+  Phases 2–5.
+- Fixed an unrelated pre-existing bug found while validating this phase:
+  `runekit/__init__.py` had an accidental duplicate/misplaced copy of
+  `get_platform_manager()` (importing from nonexistent
+  `runekit/instance.py`/`runekit/manager.py`) that broke `import runekit`
+  entirely; restored it to empty, matching upstream.
+- Validated (on a non-Linux dev machine, since real portal/KWin behavior
+  isn't exercised until Phase 2+): `import runekit`/`import runekit.game`
+  succeed, `_is_wayland_session()` returns the correct result for
+  `XDG_SESSION_TYPE=wayland`, `WAYLAND_DISPLAY` set, and X11/no-env-var
+  cases, `get_platform_manager()` routes to `WaylandGameManager` under a
+  simulated Wayland session, and the stub classes instantiate and satisfy
+  the ABCs without error. The X11 and macOS branches are unaffected.
 
 ### Phase 2 — Screen capture pipeline
 

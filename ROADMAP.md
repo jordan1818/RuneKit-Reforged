@@ -256,27 +256,45 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   `applicationStateChanged.disconnect(...)` silently failed to suppress
   it. Fixed with an explicit `self._stopped` flag so `stop()`'s body
   (including the disconnect) only ever runs once per instance.
-- Both fix notes above were diagnosed from a real run of
+- **Fix note:** `WaylandGameManager.get_active_instance()` originally
+  filtered `get_instances()` by `is_focused()`, mirroring the X11/Quartz
+  pattern where multiple instances can genuinely compete for focus. But
+  this manager only ever tracks at most one instance (the `ScreenCast`
+  portal only hands back one picked window per session), and
+  `is_focused()` is a proxy for "does *RuneKit's own* window have OS
+  focus" (see above) — which is essentially never simultaneously true
+  with the game window having focus, since they're different
+  applications. That combination made `get_active_instance()` return
+  `None` in ordinary use, not just when no window is picked. Fixed:
+  `get_active_instance()` now returns the sole tracked instance directly
+  (or `None` only if discovery hasn't succeeded), without consulting
+  `is_focused()`. (`Host.launch_app()` already had a fallback to
+  `get_instances()[0]` when `get_active_instance()` was `None`, so this
+  bug did not block app launching, but the `None` return itself was
+  incorrect and worth fixing for any other code that may rely on it.)
+- Validated on a real Bazzite/KDE Plasma Wayland machine via
   `runekit/game/wayland/manual_validate_discovery.py`
-  (`runekit.game.wayland.manual_validate_discovery.log`) on the reference
-  Bazzite/KDE Plasma Wayland machine: the window picker prompted once and
-  discovery/queries all ran without error, but the log showed
-  `get_position()` incorrectly returning `(0, 0, 0, 0)` plus a
-  `disconnect()` `RuntimeWarning` -- both now fixed as described above and
-  smoke-tested locally (off-Linux) with the portal D-Bus/Gst calls mocked
-  out (stream metadata omitting `size`, a fake captured frame, and a
-  double `stop()` call). **Re-running the script on the real machine to
-  confirm both fixes together is still pending** before this phase can be
-  marked fully complete.
+  (`runekit.game.wayland.manual_validate_discovery.log`): the window
+  picker prompted once, `get_position()` now correctly reports the real
+  picked window's dimensions (derived from the captured frame, confirming
+  the `stream_size` fix above), the disconnect `RuntimeWarning` is gone,
+  and `get_scaling()` correctly reported `1.0` on a 100%-scale display.
+  `is_focused()` reported `False` and `get_active_instance()` reported
+  `None` in that run because the validation script is a headless
+  `QGuiApplication` with no visible window (so it never has OS focus) —
+  expected per the `is_focused()` proxy design, not a bug; separately,
+  the `get_active_instance()` `None` result was the manager-level bug
+  described above, now fixed. The `get_active_instance()` fix itself has
+  been smoke-tested locally (off-Linux) with the portal calls mocked out,
+  but **re-running the script on the real machine to confirm it returns
+  the picked instance is still pending** before this phase can be marked
+  fully complete.
 - A manual validation script (`runekit/game/wayland/manual_validate_discovery.py`,
   mirroring Phase 2's `manual_validate_capture.py` since this project has
   no automated test suite) exercises `WaylandGameManager.get_instances()`/
   `get_active_instance()` and prints the resulting `get_position()`/
   `get_scaling()`/`is_focused()` values, plus a `--repick` flag to test
-  `repick_window()`. This phase should be marked fully complete only after
-  that script is re-run and visually confirmed on the reference
-  Bazzite/KDE Plasma Wayland machine (picker prompts once,
-  `restore_token` persists across runs, `--repick` forces a re-prompt).
+  `repick_window()`.
 
 ### Phase 4 — Global hotkey (Alt+1)
 

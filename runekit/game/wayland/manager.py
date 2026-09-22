@@ -42,11 +42,17 @@ class WaylandGameManager(GameManager):
         return list(self._instances.values())
 
     def get_active_instance(self) -> Union[GameInstance, None]:
-        for instance in self.get_instances():
-            if instance.is_focused():
-                return instance
-
-        return None
+        # Unlike X11/Quartz, this manager only ever tracks at most one
+        # instance (the ScreenCast portal only hands back one picked
+        # window per session -- see class docstring), so there's no real
+        # "which instance is active" disambiguation to do here. Return it
+        # directly rather than filtering by is_focused(): that proxy
+        # tracks whether *RuneKit's own* windows have OS focus (see
+        # WaylandGameInstance.is_focused()), which is almost never true at
+        # the same time as the game window having focus, and would make
+        # this incorrectly return None during normal use.
+        instances = self.get_instances()
+        return instances[0] if instances else None
 
     def _discover_window(self) -> Optional[WaylandGameInstance]:
         """Run the ScreenCast portal flow to pick a window, and construct a

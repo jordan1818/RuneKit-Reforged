@@ -31,11 +31,17 @@ What to check after running:
        Phase 3: WINDOW-type ScreenCast streams don't expose an on-screen
        position).
     3. get_scaling() reports a plausible DPI scale factor.
-    4. is_focused() prints True while this script's (invisible, since it's
-       a QGuiApplication with no window) process is the active application,
-       and toggles if you can trigger applicationStateChanged another way;
-       this is a best-effort approximation, not real per-window focus.
-    5. --repick discards the persisted restore_token and instance, and the
+    4. is_focused() will print False when run via this script, since it's
+       a QGuiApplication with no visible window and therefore never has OS
+       focus -- this is expected (see ROADMAP.md Phase 3: is_focused() is
+       a best-effort proxy for "a RuneKit window has OS focus", not real
+       per-window game focus, so it won't be exercised meaningfully by this
+       headless script).
+    5. get_active_instance() should return the SAME instance as
+       get_instances()[0] regardless of is_focused() -- this manager only
+       ever tracks one instance, so there's nothing to disambiguate (see
+       ROADMAP.md Phase 3 fix note).
+    6. --repick discards the persisted restore_token and instance, and the
        next run (without --repick) shows the picker again.
 Report back GO/NO-GO so ROADMAP.md Phase 3 can be marked complete or fixed.
 """

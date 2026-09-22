@@ -1,7 +1,8 @@
 # Wayland Support Roadmap (Plan A: Wayland + X11)
 
 Status: Phase 0 complete (all spikes GO). Phase 1 complete (session
-detection & scaffolding implemented).
+detection & scaffolding implemented). Phase 2 complete (screen capture
+pipeline implemented and validated on a real KDE Plasma Wayland machine).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -96,12 +97,12 @@ Scripts and logs are in `spike/wayland/`:
 - `test_globalshortcuts_portal.py` — **GO**. `GlobalShortcuts`
   `CreateSession` → `BindShortcuts` → 5x `Activated` signal deliveries for a
   bound Alt+1 shortcut, via PyGObject's `Gio`.
-- `plasmawindowmanagement`/layer-shell (`test_plasma_window_management.py`,
-  `test_layer_shell.py`, both `pywayland`-based) were **not run** — per
-  project-owner decision, `pywayland` is dropped from the plan entirely
-  rather than validated. Window discovery uses the `ScreenCast` picker
-  instead (see Feasibility notes and Phase 3); the layer-shell overlay
-  question is deferred to Phase 5.
+- `plasmawindowmanagement`/layer-shell spikes (both `pywayland`-based) were
+  **not run** — per project-owner decision, `pywayland` is dropped from the
+  plan entirely rather than validated, and the unrun spike scripts were
+  later deleted from `spike/wayland/`. Window discovery uses the
+  `ScreenCast` picker instead (see Feasibility notes and Phase 3); the
+  layer-shell overlay question is deferred to Phase 5.
 
 **Fix note:** all `CreateSession` calls (`ScreenCast` and `GlobalShortcuts`)
 must include a `session_handle_token` string in the options vardict in
@@ -145,21 +146,51 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   simulated Wayland session, and the stub classes instantiate and satisfy
   the ABCs without error. The X11 and macOS branches are unaffected.
 
-### Phase 2 — Screen capture pipeline
+### Phase 2 — Screen capture pipeline ✅ COMPLETE
 
-- Implement the `org.freedesktop.portal.ScreenCast` D-Bus session flow
-  (`CreateSession` → `SelectSources` → `Start` → `OpenPipeWireRemote`) using
-  PyGObject's `Gio.DBusProxy`/`Gio.bus_get_sync` (GDBus) exclusively — no
-  `dbus-next`/`pydbus`. `CreateSession`'s options vardict must include both
+- Implemented the `org.freedesktop.portal.ScreenCast` D-Bus session flow
+  (`CreateSession` → `SelectSources` → `Start` → `OpenPipeWireRemote`) in
+  `runekit/game/wayland/portal.py` (`ScreenCastSession`/`PortalRequest`)
+  using PyGObject's `Gio.DBusProxy`/`Gio.bus_get_sync` (GDBus) exclusively —
+  no `dbus-next`/`pydbus`. `CreateSession`'s options vardict includes both
   `handle_token` and `session_handle_token` (see Phase 0 fix note above).
+  `import gi` is deferred into methods so the module imports cleanly on
+  platforms/sessions without PyGObject installed.
 - Consume the PipeWire stream via PyGObject's `Gst`/`GstApp` bindings
-  (`pipewiresrc ! videoconvert ! appsink`) and convert frames to the numpy
-  BGRA32 format expected by `GameInstance.grab_game`/`grab_desktop`/
-  `grab_region` — validated end-to-end in
-  `spike/wayland/test_screencast_full_pipeline.py`.
-- Persist and reuse the `restore_token` (e.g. via `QSettings`, mirroring how
-  other settings are stored in `runekit/host/settings.py`) to avoid
-  re-prompting the user every launch.
+  (`pipewiresrc ! videoconvert ! appsink`) in
+  `runekit/game/wayland/capture.py` (`PipeWireCapture`), converting frames
+  to the numpy BGRA32 format expected by `GameInstance.grab_game`/
+  `grab_desktop`/`grab_region`. Runs on a background `QThread`
+  (`WaylandCaptureWorker`/`WaylandCapturePipeline`), mirroring the existing
+  `X11GameManager`/`X11EventWorker` pattern, so the blocking D-Bus/portal
+  picker/appsink calls don't stall Qt's event loop.
+- `WaylandGameInstance.grab_game()` (`runekit/game/wayland/instance.py`)
+  lazily starts the capture pipeline on first call and returns the cached
+  latest frame respecting `refresh_rate`; `grab_desktop()`/`grab_region()`
+  crop from that same window-stream frame via the existing `np_crop` helper
+  (there is no separate `MONITOR`-type portal session in this phase).
+  `stop()`/`__del__` close the portal session and Gst pipeline on teardown.
+- Persist and reuse the `restore_token` via `QSettings`
+  (`wayland/screencastRestoreToken`, mirroring how other settings are
+  stored in `runekit/host/settings.py`) to avoid re-prompting the user
+  every launch, replacing the Phase 0 spike's JSON-file storage.
+- **Fix note:** `GstApp` must be actually imported (`from gi.repository
+  import Gst, GstApp`), not merely passed to `gi.require_version()`, or
+  PyGObject never attaches the `GstApp.AppSink` overrides (e.g.
+  `try_pull_sample`) to the appsink element, causing `AttributeError:
+  'GstAppSink' object has no attribute 'try_pull_sample'` even though the
+  pipeline itself builds and reaches `PLAYING` state successfully. This
+  only surfaced on a real KDE Plasma Wayland machine, since the Phase 0
+  spike script imported `GstApp` directly and never hit it.
+- Validated end-to-end on a real Bazzite/KDE Plasma Wayland machine via
+  `runekit/game/wayland/manual_validate_capture.py` (manual validation
+  script exercising the production classes above; this project has no
+  automated test suite, so this mirrors how the Phase 0 spikes were
+  validated): the window picker prompted once, the `QSettings`-persisted
+  `restore_token` avoided re-prompting on subsequent runs, 5 frames were
+  captured at 2560×1394 (matching the Phase 0 reference capture) with no
+  errors after the `GstApp` fix above, and the saved PNGs were opened and
+  visually confirmed to show the picked window's live contents.
 
 ### Phase 3 — Window discovery, geometry, focus tracking
 

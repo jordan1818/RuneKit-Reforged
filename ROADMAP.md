@@ -235,48 +235,65 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   `positionChanged`/`focusChanged` event source. `get_position()` returns a
   static `QRect(0, 0, width, height)` (the `(0, 0)` origin is a known
   limitation, documented in code, not a bug — anchoring elsewhere would be
-  equally arbitrary without real compositor coordinates); `get_scaling()`
-  has no `QWindow` handle to look up the picked window's actual screen
-  (unlike X11's `QWindow.fromWinId`), so it uses
-  `QGuiApplication.screenAt(QCursor.pos())` (falling back to
-  `primaryScreen()` if the cursor isn't over any known screen) as a
-  best-effort proxy for "the screen the user is currently on";
-  `is_focused()` is best-effort, treating the instance as focused whenever
-  RuneKit's own `QGuiApplication.applicationState()` is `ApplicationActive`
-  (wired via `applicationStateChanged` to still emit the existing
-  `focusChanged` Qt signal, so `overlay.py`/`GameManager.get_active_instance()`
-  keep working unchanged) — since an unprivileged Wayland client cannot
-  query another window's activation state without a privileged protocol.
-  This is a known Wayland limitation rather than an attempt to fully
-  replicate X11 behavior.
-- **Fix note (multi-monitor):** `get_scaling()` originally always read
-  `QGuiApplication.primaryScreen().devicePixelRatio()`. KDE Plasma Wayland
-  supports independent per-monitor scaling (unlike X11's global-only
-  scaling), so on a setup with multiple displays at different scale
-  factors, this would silently report the wrong value whenever the picked
-  game window isn't on the primary display — invisible on a single-monitor
-  dev machine, but a real risk flagged when testing on a 3-display
-  (2 real monitors + a 4K dummy HDMI output) setup. Switched to
-  `QGuiApplication.screenAt(QCursor.pos())` (falling back to
-  `primaryScreen()`) as a closer live proxy for "the screen the user is
-  actually looking at," since there is no way to look up a portal-picked
-  window's real screen directly. This remains an approximation — if the
-  mouse is on a different monitor than the game window when
-  `get_scaling()`/`getRegion` is polled, the reported value can still be
-  momentarily wrong — but it is a strictly better heuristic than a fixed
-  primary-display assumption. Confirmed increasing/decreasing behavior
-  locally (off-Linux, using the dev machine's real multi-monitor Windows
-  displays rather than the KDE Wayland reference machine, whose displays
-  are all at 100% so this couldn't be observed changing there): with a
-  non-primary display set to 125% scaling, moving the mouse cursor onto
-  that display made `get_scaling()` correctly report `1.25` (vs. `1.0`
-  when the cursor was on a 100%-scale display, including the 100%-scale
-  primary), proving `screenAt(QCursor.pos())` -- not a fixed
-  `primaryScreen()` read -- drives the result. Still pending: exercising
-  this same increasing/decreasing check on the actual reference KDE
-  Plasma Wayland machine with a real per-monitor scale change, since Qt's
-  `devicePixelRatio()` plumbing on Wayland could in principle behave
-  differently than on Windows.
+  equally arbitrary without real compositor coordinates); `is_focused()`
+  is best-effort, treating the instance as focused whenever RuneKit's own
+  `QGuiApplication.applicationState()` is `ApplicationActive` (wired via
+  `applicationStateChanged` to still emit the existing `focusChanged` Qt
+  signal, so `overlay.py`/`GameManager.get_active_instance()` keep working
+  unchanged) — since an unprivileged Wayland client cannot query another
+  window's activation state without a privileged protocol. This is a known
+  Wayland limitation rather than an attempt to fully replicate X11
+  behavior.
+- **`get_scaling()` — known upstream limitations (not fully fixable from
+  RuneKit's side) and current mitigation.** `get_scaling()` has no
+  `QWindow` handle for a portal-picked window (unlike X11's
+  `QWindow.fromWinId`), so it cannot look up that window's actual screen
+  directly, and two independent, real-hardware-confirmed KDE Plasma
+  Wayland platform bugs make any automatic screen/scale lookup unreliable
+  on multi-monitor setups (found while validating on a 3-display
+  (2 real monitors + a 4K dummy HDMI output) reference machine):
+  - **kscreen's "primary display" assignment is unreliable on 3+ monitor
+    Wayland setups.** Explicitly setting a different primary display in
+    KDE System Settings did not take effect, and after a further change it
+    was observed on a different, still-incorrect output — a known class of
+    upstream `kscreen`/KWin bug on multi-monitor Wayland configurations,
+    not something RuneKit's code can influence or correct.
+  - **Qt's Wayland QPA rounds fractional `devicePixelRatio()` up to the
+    next integer.** With a real display set to 125% scaling,
+    `screen.devicePixelRatio()` reported `2.0` instead of `1.25` — a known
+    Qt-on-Wayland limitation (fractional scale support requires the
+    specific window to have negotiated `wp_fractional_scale_v1`, which
+    Qt's default integer-rounding path does not do), not something fixable
+    without patching Qt itself.
+  - **`QCursor.pos()` cannot return a real global position on native
+    Wayland for a client with no window under the pointer** (Wayland's
+    security model does not let a client query the desktop-wide pointer
+    position without actual pointer focus). An earlier revision of
+    `get_scaling()` used `QGuiApplication.screenAt(QCursor.pos())` as its
+    primary heuristic; real-machine testing showed this returning a
+    stale/incorrect position and screen, confirming this approach is
+    fundamentally unsound on Wayland (not just wrong in the headless
+    validation script) and it has been removed.
+  - **Current implementation:** `get_scaling()` now checks, in order: (1)
+    an optional manual override via the `RK_WAYLAND_SCALING` environment
+    variable (e.g. `RK_WAYLAND_SCALING=1.25`), for a user to hardcode the
+    correct value on a setup affected by either upstream bug above; (2)
+    the `devicePixelRatio()` of whichever RuneKit top-level `QWindow` is
+    currently visible, found via `QGuiApplication.topLevelWindows()` — a
+    `QWindow`'s `screen()` is tracked reliably via real compositor
+    surface-enter/leave events, unlike a cursor-position query, though it
+    still inherits Qt's fractional-scale rounding bug above and only
+    identifies "a RuneKit window's screen," not necessarily the game
+    window's screen; (3) `QGuiApplication.primaryScreen()` as the final
+    fallback (e.g. before any RuneKit window exists), which inherits both
+    upstream bugs. Validated end-to-end (mocked portal calls, real Qt/
+    PySide6) that all three paths select correctly and take priority in
+    the documented order; the window-based and primary-screen paths were
+    not exercised with a real fractional/mismatched-primary Wayland
+    configuration (only confirmed via KDE Plasma Wayland real-machine
+    testing that the two underlying platform bugs exist as described
+    above), so `RK_WAYLAND_SCALING` remains the only fully-reliable
+    mitigation for an affected multi-monitor Wayland user today.
 - **Fix note:** `WaylandGameInstance.stop()` (called both explicitly by
   callers like `repick_window()`/`Host` teardown, and again from
   `__del__` at interpreter shutdown) must be idempotent. PySide6 reports a

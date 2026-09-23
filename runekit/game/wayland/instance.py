@@ -1,9 +1,10 @@
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QGraphicsItem
 
 from runekit.image.np_utils import np_crop
@@ -13,6 +14,39 @@ from .portal import ScreenCastSession
 
 if TYPE_CHECKING:
     from .manager import WaylandGameManager
+
+# Manual override for get_scaling(), e.g. RK_WAYLAND_SCALING=1.25.
+#
+# Both Qt's QScreen.devicePixelRatio() and the "which screen is the game
+# on" lookup are unreliable on native KDE Plasma Wayland (see ROADMAP.md
+# Phase 3 "known upstream limitation" note):
+#   - Qt's Wayland QPA only supports integer devicePixelRatio unless the
+#     specific window has negotiated wp_fractional_scale_v1, so a
+#     compositor scale of e.g. 125%/150% is frequently reported back as a
+#     rounded-up 2.0 instead of 1.25/1.5.
+#   - KDE's kscreen "primary display" assignment has long-standing bugs on
+#     3+ monitor Wayland setups where it does not reliably persist/apply
+#     the user's chosen primary output.
+# Neither is fixable from RuneKit's side without a privileged Wayland
+# protocol client (out of scope -- see ROADMAP.md Feasibility notes). This
+# env var lets an affected user hardcode the correct value for their setup.
+WAYLAND_SCALING_OVERRIDE_ENV = "RK_WAYLAND_SCALING"
+
+
+def _get_scaling_override() -> Optional[float]:
+    raw = os.environ.get(WAYLAND_SCALING_OVERRIDE_ENV)
+    if not raw:
+        return None
+
+    try:
+        return float(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "%s=%r is not a valid float, ignoring override",
+            WAYLAND_SCALING_OVERRIDE_ENV,
+            raw,
+        )
+        return None
 
 
 class WaylandGameInstance(GameInstance):
@@ -131,26 +165,47 @@ class WaylandGameInstance(GameInstance):
             self.logger.warning("Timed out waiting for a frame to derive window size")
 
     def get_scaling(self) -> float:
+        # Manual escape hatch first: both of the automatic sources below
+        # are known-unreliable on native KDE Plasma Wayland (integer-only
+        # devicePixelRatio rounding, and kscreen's primary-display
+        # assignment bugs on 3+ monitor setups -- see the module-level
+        # comment and ROADMAP.md Phase 3). Let an affected user hardcode
+        # the correct value rather than get a silently wrong one.
+        override = _get_scaling_override()
+        if override is not None:
+            return override
+
         # No QWindow handle exists for a portal-picked window (unlike
         # X11's QWindow.fromWinId), so there is no way to look up "the
         # screen this window is actually on" directly. KDE Plasma Wayland
         # supports independent per-monitor scaling (unlike X11's
-        # global-only scaling), so on a multi-monitor setup, always using
+        # global-only scaling), so always using
         # QGuiApplication.primaryScreen() would silently report the wrong
-        # value whenever the game isn't on the primary display.
+        # value whenever the game isn't on the primary display -- worse,
+        # KDE's own primary-display assignment is itself unreliable on
+        # multi-monitor Wayland setups (see ROADMAP.md Phase 3).
         #
-        # Best-effort improvement (still an approximation, per ROADMAP.md
-        # Phase 3): use whichever screen the mouse cursor is currently on,
-        # since that's a much better live proxy for "the screen the user
-        # is looking at/interacting with" than a fixed primary-display
-        # assumption -- falling back to primaryScreen() if the cursor
-        # isn't over any known screen (e.g. it moved off all outputs
-        # momentarily).
-        screen = QGuiApplication.screenAt(QCursor.pos())
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
+        # Best-effort fallback: use whichever screen a currently-visible
+        # RuneKit top-level window is on. Unlike a cursor-position lookup
+        # (dropped -- QCursor.pos() cannot return a real global position
+        # on native Wayland for a client with no window under the pointer,
+        # e.g. this GameManager/GameInstance's own headless bookkeeping),
+        # a QWindow's screen is tracked reliably via real compositor
+        # surface-enter/leave events. Falls back to primaryScreen() if no
+        # RuneKit window is visible yet (e.g. before any app is launched).
+        screen = self._get_visible_window_screen() or QGuiApplication.primaryScreen()
 
         return screen.devicePixelRatio() if screen else 1.0
+
+    @staticmethod
+    def _get_visible_window_screen():
+        for window in QGuiApplication.topLevelWindows():
+            if window.isVisible():
+                screen = window.screen()
+                if screen is not None:
+                    return screen
+
+        return None
 
     def is_focused(self) -> bool:
         return self._is_focused

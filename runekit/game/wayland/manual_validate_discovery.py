@@ -30,12 +30,16 @@ What to check after running:
        window (x/y will always be 0,0 -- this is expected, see ROADMAP.md
        Phase 3: WINDOW-type ScreenCast streams don't expose an on-screen
        position).
-    3. get_scaling() reports a plausible DPI scale factor for whichever
-       screen the mouse cursor is on at the time this script is run (see
-       ROADMAP.md Phase 3 multi-monitor fix note) -- move the mouse to a
-       different monitor before running if you want to test a specific
-       screen's scaling, especially on a multi-monitor setup with
-       different scale factors configured per screen.
+    3. get_scaling() reports a plausible DPI scale factor. This script has
+       no visible window, so get_scaling() will fall back to
+       primaryScreen() -- check the "All screens" printout to see which
+       screen KDE currently reports as primary (this can be wrong on
+       multi-monitor Wayland setups; see ROADMAP.md Phase 3 "known
+       upstream limitation" note) and its devicePixelRatio (Qt's Wayland
+       backend often rounds fractional scales like 125%/150% up to 2.0 --
+       also documented there). Set RK_WAYLAND_SCALING=<value> (e.g.
+       RK_WAYLAND_SCALING=1.25) before running to override the value
+       entirely and confirm the override path works.
     4. is_focused() will print False when run via this script, since it's
        a QGuiApplication with no visible window and therefore never has OS
        focus -- this is expected (see ROADMAP.md Phase 3: is_focused() is
@@ -51,11 +55,13 @@ What to check after running:
 Report back GO/NO-GO so ROADMAP.md Phase 3 can be marked complete or fixed.
 """
 import argparse
+import os
 import sys
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtGui import QGuiApplication
 
+from .instance import WAYLAND_SCALING_OVERRIDE_ENV
 from .manager import WaylandGameManager
 from .portal import clear_restore_token
 
@@ -90,11 +96,14 @@ def run():
     pos = instance.get_position()
     print(f"get_position() -> x={pos.x()} y={pos.y()} w={pos.width()} h={pos.height()}")
 
-    cursor_pos = QCursor.pos()
-    cursor_screen = QGuiApplication.screenAt(cursor_pos)
+    override = os.environ.get(WAYLAND_SCALING_OVERRIDE_ENV)
+    if override:
+        print(f"{WAYLAND_SCALING_OVERRIDE_ENV}={override!r} is set; get_scaling() should return it directly")
+
+    visible_windows = [w for w in QGuiApplication.topLevelWindows() if w.isVisible()]
     print(
-        f"Mouse cursor at {cursor_pos.x()},{cursor_pos.y()} -> screen "
-        f"{cursor_screen.name() if cursor_screen else '(none, will use primaryScreen)'}"
+        f"Visible top-level RuneKit windows: {len(visible_windows)} "
+        f"(this script has none, so get_scaling() will fall back to primaryScreen())"
     )
     print("All screens:")
     for screen in QGuiApplication.screens():

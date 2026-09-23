@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QGraphicsItem
 from runekit.image.np_utils import np_crop
 from ..instance import GameInstance, ImageType
 from .capture import WaylandCapturePipeline
+from .globalshortcuts import GlobalShortcutsPipeline
 from .portal import ScreenCastSession
 
 if TYPE_CHECKING:
@@ -68,8 +69,12 @@ class WaylandGameInstance(GameInstance):
     available without plasmawindowmanagement (dropped from this project's
     plan -- see ROADMAP.md Feasibility notes/Non-goals).
 
-    The global hotkey and the overlay are implemented in later phases --
-    see ROADMAP.md Phases 4-5.
+    The global Alt+1 hotkey (ROADMAP.md Phase 4) is implemented via the
+    org.freedesktop.portal.GlobalShortcuts CreateSession -> BindShortcuts ->
+    Activated flow (see .globalshortcuts), also run on a background QThread
+    and started eagerly in __init__ (unlike screen capture, which is lazy)
+    since there's no other trigger to defer it to. The overlay is
+    implemented in a later phase -- see ROADMAP.md Phase 5.
     """
 
     overlay: QGraphicsItem
@@ -115,6 +120,17 @@ class WaylandGameInstance(GameInstance):
         QGuiApplication.instance().applicationStateChanged.connect(
             self._on_application_state_changed
         )
+
+        # Global Alt+1 hotkey (ROADMAP.md Phase 4). Started eagerly (unlike
+        # the lazy capture pipeline above) since there's no other natural
+        # trigger for it, and binding a GlobalShortcuts session is cheap/
+        # idempotent from the user's perspective (a one-time grant dialog).
+        # GlobalShortcutsPipeline degrades gracefully (logs and no-ops) if
+        # the portal is unavailable, e.g. pre-Plasma 6.1 -- see
+        # globalshortcuts.py.
+        self._hotkey_pipeline = GlobalShortcutsPipeline(self)
+        self._hotkey_pipeline.alt1_pressed.connect(self.alt1_pressed)
+        self._hotkey_pipeline.start()
 
     def get_position(self) -> QRect:
         if self._position is None:
@@ -284,6 +300,8 @@ class WaylandGameInstance(GameInstance):
         if self._stopped:
             return
         self._stopped = True
+
+        self._hotkey_pipeline.stop()
 
         if self._capture_pipeline is not None:
             self._capture_pipeline.stop()

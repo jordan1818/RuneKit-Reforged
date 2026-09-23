@@ -53,6 +53,11 @@ def _signature_for(method_name: str) -> str:
         "CreateSession": "(a{sv})",
         "SelectSources": "(oa{sv})",
         "Start": "(osa{sv})",
+        # org.freedesktop.portal.GlobalShortcuts.BindShortcuts (ROADMAP.md
+        # Phase 4), added here rather than duplicating PortalRequest since
+        # its CreateSession/session_handle_token handling is identical to
+        # ScreenCast's -- see globalshortcuts.py.
+        "BindShortcuts": "(oa(sa{sv})sa{sv})",
     }[method_name]
 
 

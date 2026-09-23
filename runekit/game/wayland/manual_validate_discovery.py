@@ -30,7 +30,12 @@ What to check after running:
        window (x/y will always be 0,0 -- this is expected, see ROADMAP.md
        Phase 3: WINDOW-type ScreenCast streams don't expose an on-screen
        position).
-    3. get_scaling() reports a plausible DPI scale factor.
+    3. get_scaling() reports a plausible DPI scale factor for whichever
+       screen the mouse cursor is on at the time this script is run (see
+       ROADMAP.md Phase 3 multi-monitor fix note) -- move the mouse to a
+       different monitor before running if you want to test a specific
+       screen's scaling, especially on a multi-monitor setup with
+       different scale factors configured per screen.
     4. is_focused() will print False when run via this script, since it's
        a QGuiApplication with no visible window and therefore never has OS
        focus -- this is expected (see ROADMAP.md Phase 3: is_focused() is
@@ -49,7 +54,7 @@ import argparse
 import sys
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QCursor, QGuiApplication
 
 from .manager import WaylandGameManager
 from .portal import clear_restore_token
@@ -84,6 +89,17 @@ def run():
 
     pos = instance.get_position()
     print(f"get_position() -> x={pos.x()} y={pos.y()} w={pos.width()} h={pos.height()}")
+
+    cursor_pos = QCursor.pos()
+    cursor_screen = QGuiApplication.screenAt(cursor_pos)
+    print(
+        f"Mouse cursor at {cursor_pos.x()},{cursor_pos.y()} -> screen "
+        f"{cursor_screen.name() if cursor_screen else '(none, will use primaryScreen)'}"
+    )
+    print("All screens:")
+    for screen in QGuiApplication.screens():
+        marker = " <- primary" if screen is QGuiApplication.primaryScreen() else ""
+        print(f"  {screen.name()}: devicePixelRatio={screen.devicePixelRatio()}{marker}")
 
     scaling = instance.get_scaling()
     print(f"get_scaling() -> {scaling}")

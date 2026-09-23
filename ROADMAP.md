@@ -3,8 +3,8 @@
 Status: Phase 0 complete (all spikes GO). Phase 1 complete (session
 detection & scaffolding implemented). Phase 2 complete (screen capture
 pipeline implemented and validated on a real KDE Plasma Wayland machine).
-Phase 3 implemented (window discovery, static geometry, best-effort focus
-tracking) but pending validation on a real KDE Plasma Wayland machine.
+Phase 3 complete (window discovery, static geometry, best-effort focus
+tracking implemented and validated on a real KDE Plasma Wayland machine).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -194,7 +194,7 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   errors after the `GstApp` fix above, and the saved PNGs were opened and
   visually confirmed to show the picked window's live contents.
 
-### Phase 3 — Window discovery, geometry, focus tracking ⏳ IMPLEMENTED, pending real-machine validation
+### Phase 3 — Window discovery, geometry, focus tracking ✅ COMPLETE
 
 - Window discovery uses the `ScreenCast` portal's own `WINDOW`-source picker
   exclusively (no `plasmawindowmanagement`/`pywayland`): `WaylandGameManager`
@@ -236,17 +236,47 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   static `QRect(0, 0, width, height)` (the `(0, 0)` origin is a known
   limitation, documented in code, not a bug — anchoring elsewhere would be
   equally arbitrary without real compositor coordinates); `get_scaling()`
-  falls back to `QGuiApplication.primaryScreen().devicePixelRatio()` (no
-  `QWindow` handle exists for a portal-picked window, unlike X11's
-  `QWindow.fromWinId`); `is_focused()` is best-effort, treating the
-  instance as focused whenever RuneKit's own
-  `QGuiApplication.applicationState()` is `ApplicationActive` (wired via
-  `applicationStateChanged` to still emit the existing `focusChanged` Qt
-  signal, so `overlay.py`/`GameManager.get_active_instance()` keep working
-  unchanged) — since an unprivileged Wayland client cannot query another
-  window's activation state without a privileged protocol. This is a known
-  Wayland limitation rather than an attempt to fully replicate X11
-  behavior.
+  has no `QWindow` handle to look up the picked window's actual screen
+  (unlike X11's `QWindow.fromWinId`), so it uses
+  `QGuiApplication.screenAt(QCursor.pos())` (falling back to
+  `primaryScreen()` if the cursor isn't over any known screen) as a
+  best-effort proxy for "the screen the user is currently on";
+  `is_focused()` is best-effort, treating the instance as focused whenever
+  RuneKit's own `QGuiApplication.applicationState()` is `ApplicationActive`
+  (wired via `applicationStateChanged` to still emit the existing
+  `focusChanged` Qt signal, so `overlay.py`/`GameManager.get_active_instance()`
+  keep working unchanged) — since an unprivileged Wayland client cannot
+  query another window's activation state without a privileged protocol.
+  This is a known Wayland limitation rather than an attempt to fully
+  replicate X11 behavior.
+- **Fix note (multi-monitor):** `get_scaling()` originally always read
+  `QGuiApplication.primaryScreen().devicePixelRatio()`. KDE Plasma Wayland
+  supports independent per-monitor scaling (unlike X11's global-only
+  scaling), so on a setup with multiple displays at different scale
+  factors, this would silently report the wrong value whenever the picked
+  game window isn't on the primary display — invisible on a single-monitor
+  dev machine, but a real risk flagged when testing on a 3-display
+  (2 real monitors + a 4K dummy HDMI output) setup. Switched to
+  `QGuiApplication.screenAt(QCursor.pos())` (falling back to
+  `primaryScreen()`) as a closer live proxy for "the screen the user is
+  actually looking at," since there is no way to look up a portal-picked
+  window's real screen directly. This remains an approximation — if the
+  mouse is on a different monitor than the game window when
+  `get_scaling()`/`getRegion` is polled, the reported value can still be
+  momentarily wrong — but it is a strictly better heuristic than a fixed
+  primary-display assumption. Confirmed increasing/decreasing behavior
+  locally (off-Linux, using the dev machine's real multi-monitor Windows
+  displays rather than the KDE Wayland reference machine, whose displays
+  are all at 100% so this couldn't be observed changing there): with a
+  non-primary display set to 125% scaling, moving the mouse cursor onto
+  that display made `get_scaling()` correctly report `1.25` (vs. `1.0`
+  when the cursor was on a 100%-scale display, including the 100%-scale
+  primary), proving `screenAt(QCursor.pos())` -- not a fixed
+  `primaryScreen()` read -- drives the result. Still pending: exercising
+  this same increasing/decreasing check on the actual reference KDE
+  Plasma Wayland machine with a real per-monitor scale change, since Qt's
+  `devicePixelRatio()` plumbing on Wayland could in principle behave
+  differently than on Windows.
 - **Fix note:** `WaylandGameInstance.stop()` (called both explicitly by
   callers like `repick_window()`/`Host` teardown, and again from
   `__del__` at interpreter shutdown) must be idempotent. PySide6 reports a
@@ -272,29 +302,20 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   `get_instances()[0]` when `get_active_instance()` was `None`, so this
   bug did not block app launching, but the `None` return itself was
   incorrect and worth fixing for any other code that may rely on it.)
-- Validated on a real Bazzite/KDE Plasma Wayland machine via
-  `runekit/game/wayland/manual_validate_discovery.py`
-  (`runekit.game.wayland.manual_validate_discovery.log`): the window
-  picker prompted once, `get_position()` now correctly reports the real
-  picked window's dimensions (derived from the captured frame, confirming
-  the `stream_size` fix above), the disconnect `RuntimeWarning` is gone,
-  and `get_scaling()` correctly reported `1.0` on a 100%-scale display.
-  `is_focused()` reported `False` and `get_active_instance()` reported
-  `None` in that run because the validation script is a headless
-  `QGuiApplication` with no visible window (so it never has OS focus) —
-  expected per the `is_focused()` proxy design, not a bug; separately,
-  the `get_active_instance()` `None` result was the manager-level bug
-  described above, now fixed. The `get_active_instance()` fix itself has
-  been smoke-tested locally (off-Linux) with the portal calls mocked out,
-  but **re-running the script on the real machine to confirm it returns
-  the picked instance is still pending** before this phase can be marked
-  fully complete.
-- A manual validation script (`runekit/game/wayland/manual_validate_discovery.py`,
-  mirroring Phase 2's `manual_validate_capture.py` since this project has
-  no automated test suite) exercises `WaylandGameManager.get_instances()`/
-  `get_active_instance()` and prints the resulting `get_position()`/
-  `get_scaling()`/`is_focused()` values, plus a `--repick` flag to test
-  `repick_window()`.
+- Validated end-to-end on a real Bazzite/KDE Plasma Wayland machine (two
+  runs) via `runekit/game/wayland/manual_validate_discovery.py` (a manual
+  validation script mirroring Phase 2's `manual_validate_capture.py`,
+  since this project has no automated test suite): the window picker
+  prompted once; `get_position()` correctly reports the real picked
+  window's dimensions (derived from the captured frame, confirming the
+  `stream_size` fix above); the disconnect `RuntimeWarning` is gone;
+  `get_scaling()` correctly reported `1.0` on the reference machine's
+  100%-scale display; `is_focused()` reported `False` (expected, since the
+  script is a headless `QGuiApplication` with no visible window and thus
+  never has OS focus -- not a bug, see the `is_focused()` proxy design
+  above); and, after the `get_active_instance()` fix above,
+  `get_active_instance()` correctly returned the same instance as
+  `get_instances()[0]`.
 
 ### Phase 4 — Global hotkey (Alt+1)
 

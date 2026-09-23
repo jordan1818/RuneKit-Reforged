@@ -3,7 +3,7 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QGraphicsItem
 
 from runekit.image.np_utils import np_crop
@@ -132,10 +132,24 @@ class WaylandGameInstance(GameInstance):
 
     def get_scaling(self) -> float:
         # No QWindow handle exists for a portal-picked window (unlike
-        # X11's QWindow.fromWinId), so fall back to the scaling of
-        # whichever screen RuneKit's own windows are on. Best-effort, per
-        # ROADMAP.md Phase 3.
-        screen = QGuiApplication.primaryScreen()
+        # X11's QWindow.fromWinId), so there is no way to look up "the
+        # screen this window is actually on" directly. KDE Plasma Wayland
+        # supports independent per-monitor scaling (unlike X11's
+        # global-only scaling), so on a multi-monitor setup, always using
+        # QGuiApplication.primaryScreen() would silently report the wrong
+        # value whenever the game isn't on the primary display.
+        #
+        # Best-effort improvement (still an approximation, per ROADMAP.md
+        # Phase 3): use whichever screen the mouse cursor is currently on,
+        # since that's a much better live proxy for "the screen the user
+        # is looking at/interacting with" than a fixed primary-display
+        # assumption -- falling back to primaryScreen() if the cursor
+        # isn't over any known screen (e.g. it moved off all outputs
+        # momentarily).
+        screen = QGuiApplication.screenAt(QCursor.pos())
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+
         return screen.devicePixelRatio() if screen else 1.0
 
     def is_focused(self) -> bool:

@@ -501,8 +501,25 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
     portals used elsewhere in this project) — the RuneKit-side prompt is a
     courtesy, not a compositor-enforced safeguard, and is the one thing
     that must be added on top of the spike's approach before production
-    use. **Result of this check is not yet recorded — pending a
-    real-machine run.**
+    use.
+  - **Fix note (found during first real-machine run):** the first version
+    of `test_overlay_kwin_script.py` called `run()` on the wrong D-Bus
+    object: it used `/{script_id}` (e.g. `/2`) with the
+    `org.kde.kwin.Scripting` interface, which failed with
+    `GDBus.Error:org.freedesktop.DBus.Error.UnknownObject: No such object
+    path '/2'`, so the KWin script never actually ran and `keepAbove` was
+    never applied — explaining why the overlay's geometry rendered but it
+    did not stay on top. Per KWin's own source
+    (`src/scripting/scripting.cpp`'s `AbstractScript::AbstractScript`), a
+    loaded script's per-instance object is actually registered at
+    `/Scripting/Script{id}` and exposes `run()`/`stop()` under a *separate*
+    `org.kde.kwin.Script` interface (`org.kde.kwin.Script.xml`) — distinct
+    from the top-level `/Scripting` object's `org.kde.kwin.Scripting`
+    interface, which only handles `loadScript`/`unloadScript`/
+    `isScriptLoaded`. Fixed by calling `run()` against
+    `/Scripting/Script{script_id}` with the `org.kde.kwin.Script`
+    interface. **Result of this check (with the fix applied) is not yet
+    recorded — pending a re-run on the real machine.**
   - Also flagged (separately from the Track A/B decision):
     `DesktopWideOverlay.check_compatibility()`'s black-screen self-test uses
     `QGuiApplication.primaryScreen().grabWindow(0)`, which this roadmap's

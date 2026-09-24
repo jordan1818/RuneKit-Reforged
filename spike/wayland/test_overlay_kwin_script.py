@@ -74,6 +74,16 @@ APP_ID = "runekit-overlay-spike"
 KWIN_SERVICE = "org.kde.KWin"
 KWIN_SCRIPTING_PATH = "/Scripting"
 KWIN_SCRIPTING_IFACE = "org.kde.kwin.Scripting"
+# The per-script object registered by loadScript() is NOT at "/{id}" under
+# the org.kde.kwin.Scripting interface -- KWin's source
+# (src/scripting/scripting.cpp, AbstractScript::AbstractScript) registers it
+# at "/Scripting/Script{id}" using a separate "org.kde.kwin.Script"
+# interface (org.kde.kwin.Script.xml) that only exposes run()/stop().
+# Confirmed against KWin 6 master via source inspection after CHECK 1c's
+# first real-machine run hit "GDBus.Error:...UnknownObject: No such object
+# path '/2'" using the old (incorrect) "/{id}" + "org.kde.kwin.Scripting"
+# combination -- see ROADMAP.md Phase 5.
+KWIN_SCRIPT_IFACE = "org.kde.kwin.Script"
 
 Gio = None
 GLib = None
@@ -165,14 +175,17 @@ class KWinScriptSession:
         script_id = reply.unpack()[0]
         self.logger.info("loadScript returned script id: %s", script_id)
 
+        script_object_path = f"/Scripting/Script{script_id}"
         try:
             script_proxy = Gio.DBusProxy.new_sync(
                 bus, Gio.DBusProxyFlags.NONE, None,
-                KWIN_SERVICE, f"/{script_id}", KWIN_SCRIPTING_IFACE, None,
+                KWIN_SERVICE, script_object_path, KWIN_SCRIPT_IFACE, None,
             )
             script_proxy.call_sync("run", None, Gio.DBusCallFlags.NONE, -1, None)
         except GLib.Error as exc:
-            raise KWinScriptError(f"run() on loaded script failed: {exc}") from exc
+            raise KWinScriptError(
+                f"run() on loaded script (path={script_object_path}) failed: {exc}"
+            ) from exc
 
         self._loaded = True
         self.logger.info(
@@ -226,6 +239,15 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_ID)
+    # Needed so KWin's resourceClass/resourceName (the Wayland app_id) for
+    # this window is a predictable "runekit-overlay-spike" that the KWin
+    # script's applyKeepAbove() can match, rather than falling back to the
+    # script's filename. NOTE: since no matching .desktop file is installed
+    # for this spike, Qt/xdg-desktop-portal will log a harmless
+    # "Failed to register with host portal ... App info not found" warning
+    # at startup -- this is expected and unrelated to KWin script matching
+    # (which uses the Wayland app_id directly, not the portal's app-info
+    # lookup); it can be ignored.
     app.setDesktopFileName(APP_ID)
     signal.signal(signal.SIGINT, lambda *_: app.quit())
 

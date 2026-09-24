@@ -1,0 +1,20 @@
+2026-09-24 15:42:25,533 INFO QGuiApplication.platformName() = 'wayland'
+2026-09-24 15:42:25,534 INFO Screen 0: name='DP-1' geometry=PySide6.QtCore.QRect(0, 0, 2560, 1440) virtualGeometry=PySide6.QtCore.QRect(0, 0, 8960, 2160) devicePixelRatio=1.0
+2026-09-24 15:42:25,534 INFO Screen 1: name='DP-2' geometry=PySide6.QtCore.QRect(2560, 0, 2560, 1440) virtualGeometry=PySide6.QtCore.QRect(0, 0, 8960, 2160) devicePixelRatio=1.0
+2026-09-24 15:42:25,534 INFO Screen 2: name='HDMI-A-1' geometry=PySide6.QtCore.QRect(5120, 0, 3840, 2160) virtualGeometry=PySide6.QtCore.QRect(0, 0, 8960, 2160) devicePixelRatio=1.0
+2026-09-24 15:42:25,576 INFO Wrote temp KWin script: /tmp/runekit_overlay_spike_1sdyso34.js
+2026-09-24 15:42:25,579 INFO loadScript returned script id: 2
+2026-09-24 15:42:25,579 ERROR Failed to load/start KWin script: run() on loaded script failed: g-dbus-error-quark: GDBus.Error:org.freedesktop.DBus.Error.UnknownObject: No such object path '/2' (41)
+qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.portal.Error.Failed", "Could not register app ID: App info not found for 'runekit-overlay-spike'")
+
+=> NO-GO (CHECK 1c setup): could not load a KWin script via D-Bus.
+   Error: run() on loaded script failed: g-dbus-error-quark: GDBus.Error:org.freedesktop.DBus.Error.UnknownObject: No such object path '/2' (41)
+
+======================================================================
+Auto-exiting in 30s, or press Ctrl+C.
+======================================================================
+
+
+KWin script unloaded (no permanent trace left in KWin config).
+Record whether 'keepAbove' held reliably (incl. vs. fullscreen)
+in ROADMAP.md's Phase 5 section as CHECK 1c's result.

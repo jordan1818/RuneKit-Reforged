@@ -14,33 +14,37 @@ Setup (one-time, on the Bazzite/KDE Plasma Wayland machine):
 Run:
     python -m runekit.game.wayland.manual_validate_hotkey
 
-    # A KDE "grant shortcuts" dialog should appear once; approve it and
+    # A KDE "grant shortcuts" dialog should appear once, synchronously
+    # (before the "Press Alt+1..." message is printed); approve it and
     # accept (or set) the Alt+1 binding. Then press Alt+1 a few times and
     # watch for the "alt1_pressed" printout below. Ctrl+C to stop.
 
 What to check after running:
-    1. The KDE shortcut-grant dialog appeared once, and the shortcut is
-       listed under KDE's System Settings > Shortcuts > Global Shortcuts
-       afterwards.
+    1. The KDE shortcut-grant dialog appeared once, synchronously (before
+       "Bound successfully" is printed), and the shortcut is listed under
+       KDE's System Settings > Shortcuts > Global Shortcuts afterwards.
     2. Each Alt+1 press prints exactly one "alt1_pressed" line (no missed
-       or duplicated activations).
+       or duplicated activations) -- this confirms Activated signal
+       delivery works via Qt's own main-thread event loop with no
+       dedicated GLib.MainLoop()/thread (see GlobalShortcutsSession's
+       docstring for why an earlier revision needed one and didn't work).
     3. Ctrl+C stops the script cleanly (no hung thread / traceback).
     4. On a pre-Plasma-6.1 system (or with xdg-desktop-portal-kde missing
        the GlobalShortcuts interface), the script should print a warning
-       and exit gracefully instead of crashing.
+       and exit gracefully instead of crashing/hanging.
 Report back GO/NO-GO so ROADMAP.md Phase 4 can be marked complete or fixed.
 """
 import sys
 
-from PySide6.QtCore import QCoreApplication, QTimer
+from PySide6.QtCore import QCoreApplication
 
-from .globalshortcuts import GlobalShortcutsPipeline
+from .globalshortcuts import GlobalShortcutsPortalError, GlobalShortcutsSession
 
 
 def main():
     app = QCoreApplication(sys.argv)
 
-    pipeline = GlobalShortcutsPipeline()
+    session = GlobalShortcutsSession()
 
     count = 0
 
@@ -49,25 +53,18 @@ def main():
         count += 1
         print(f"alt1_pressed (count={count})")
 
-    pipeline.alt1_pressed.connect(_on_activated)
+    session.activated.connect(_on_activated)
 
-    print("Starting GlobalShortcutsPipeline (production code path)...")
-    print("Approve the KDE shortcut-grant dialog if shown, then press Alt+1.")
-    print("Press Ctrl+C to stop.\n")
-    pipeline.start()
+    print("Opening GlobalShortcutsSession (production code path)...")
+    print("A KDE shortcut-grant dialog may appear now -- approve it if shown.")
+    try:
+        session.open()
+    except GlobalShortcutsPortalError as exc:
+        print(f"\nRESULT: GlobalShortcuts portal unavailable: {exc}")
+        print("=> NO-GO on this machine (requires xdg-desktop-portal-kde >= Plasma 6.1).")
+        return
 
-    # Poll for the worker reporting the portal as unavailable (e.g. pre-
-    # Plasma 6.1), so this script can exit informatively instead of just
-    # hanging with no visible activity.
-    def _check_unavailable():
-        if pipeline.last_error:
-            print(f"\nRESULT: GlobalShortcuts portal unavailable: {pipeline.last_error}")
-            print("=> NO-GO on this machine (requires xdg-desktop-portal-kde >= Plasma 6.1).")
-            app.quit()
-
-    timer = QTimer()
-    timer.timeout.connect(_check_unavailable)
-    timer.start(1000)
+    print("\nBound successfully. Press Alt+1 now (Ctrl+C to stop).\n")
 
     try:
         app.exec()
@@ -76,7 +73,7 @@ def main():
     finally:
         print(f"\nRESULT: received {count} alt1_pressed signal(s) this run.")
         print("=> Report back GO/NO-GO so ROADMAP.md Phase 4 can be marked complete.")
-        pipeline.stop()
+        session.close()
 
 
 if __name__ == "__main__":

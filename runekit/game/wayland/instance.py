@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QGraphicsItem
 from runekit.image.np_utils import np_crop
 from ..instance import GameInstance, ImageType
 from .capture import WaylandCapturePipeline
-from .globalshortcuts import GlobalShortcutsPipeline
+from .globalshortcuts import GlobalShortcutsPortalError, GlobalShortcutsSession
 from .portal import ScreenCastSession
 
 if TYPE_CHECKING:
@@ -71,10 +71,16 @@ class WaylandGameInstance(GameInstance):
 
     The global Alt+1 hotkey (ROADMAP.md Phase 4) is implemented via the
     org.freedesktop.portal.GlobalShortcuts CreateSession -> BindShortcuts ->
-    Activated flow (see .globalshortcuts), also run on a background QThread
-    and started eagerly in __init__ (unlike screen capture, which is lazy)
-    since there's no other trigger to defer it to. The overlay is
-    implemented in a later phase -- see ROADMAP.md Phase 5.
+    Activated flow (see .globalshortcuts), opened synchronously in
+    __init__ (unlike screen capture, which is lazy, since there's no other
+    trigger to defer it to) -- this may show KDE's one-time shortcut-grant
+    dialog. Unlike screen capture's PipeWire pull loop, no background
+    QThread is used here: Activated signal delivery relies on Qt's own
+    main-thread event loop already iterating the global default
+    GMainContext once app.exec() is running -- see GlobalShortcutsSession's
+    docstring for why an earlier QThread-based revision of this did not
+    work. The overlay is implemented in a later phase -- see ROADMAP.md
+    Phase 5.
     """
 
     overlay: QGraphicsItem
@@ -121,16 +127,21 @@ class WaylandGameInstance(GameInstance):
             self._on_application_state_changed
         )
 
-        # Global Alt+1 hotkey (ROADMAP.md Phase 4). Started eagerly (unlike
-        # the lazy capture pipeline above) since there's no other natural
-        # trigger for it, and binding a GlobalShortcuts session is cheap/
-        # idempotent from the user's perspective (a one-time grant dialog).
-        # GlobalShortcutsPipeline degrades gracefully (logs and no-ops) if
-        # the portal is unavailable, e.g. pre-Plasma 6.1 -- see
+        # Global Alt+1 hotkey (ROADMAP.md Phase 4). Opened synchronously
+        # here (unlike the lazy capture pipeline above) since there's no
+        # other natural trigger for it -- this may show KDE's one-time
+        # shortcut-grant dialog. Degrades gracefully (logs and continues
+        # without the hotkey) if the portal is unavailable, e.g.
+        # pre-Plasma 6.1, or the user declines the dialog -- see
         # globalshortcuts.py.
-        self._hotkey_pipeline = GlobalShortcutsPipeline(self)
-        self._hotkey_pipeline.alt1_pressed.connect(self.alt1_pressed)
-        self._hotkey_pipeline.start()
+        self._hotkey_session = GlobalShortcutsSession(self)
+        self._hotkey_session.activated.connect(self.alt1_pressed)
+        try:
+            self._hotkey_session.open()
+        except GlobalShortcutsPortalError as exc:
+            self.logger.warning(
+                "Wayland Alt+1 hotkey unavailable: %s", exc
+            )
 
     def get_position(self) -> QRect:
         if self._position is None:
@@ -301,7 +312,7 @@ class WaylandGameInstance(GameInstance):
             return
         self._stopped = True
 
-        self._hotkey_pipeline.stop()
+        self._hotkey_session.close()
 
         if self._capture_pipeline is not None:
             self._capture_pipeline.stop()

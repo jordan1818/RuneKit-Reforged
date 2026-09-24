@@ -1,0 +1,14 @@
+Timed out waiting for CreateSession response after 60s
+/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/portal.py:152: Warning: Source ID 5 was not found when attempting to remove it
+  GLib.source_remove(timeout_id)
+Could not bind the Wayland Alt+1 hotkey: CreateSession failed with response code None
+Starting GlobalShortcutsPipeline (production code path)...
+Approve the KDE shortcut-grant dialog if shown, then press Alt+1.
+Press Ctrl+C to stop.
+
+
+RESULT: GlobalShortcuts portal unavailable: CreateSession failed with response code None
+=> NO-GO on this machine (requires xdg-desktop-portal-kde >= Plasma 6.1).
+
+RESULT: received 0 alt1_pressed signal(s) this run.
+=> Report back GO/NO-GO so ROADMAP.md Phase 4 can be marked complete.

@@ -58,19 +58,50 @@ Manual test procedure (read this before running):
   6. CHECK 4 (transparent compositing): is there any black or opaque box
      anywhere in the overlay's geometry (over live desktop content), or
      does it composite cleanly as translucent color?
-  7. CHECK 5 (multi-monitor spanning, only if you have 2+ monitors): does
+  7. CHECK 1b (KWin window-rule workaround, only run if CHECK 1/2 FAILED):
+     WindowStaysOnTopHint has no Wayland protocol equivalent and is known
+     to be unreliable on KWin -- see ROADMAP.md Phase 5 notes. Before
+     concluding a layer-shell client (Track B) is required, test the
+     dependency-free KWin "Keep above others" window rule instead:
+       a. With this script running (use --duration with a large value, or
+          --forever, so it stays up while you do this), open KDE System
+          Settings -> Window Management -> Window Rules -> Add New.
+       b. Click "Detect Window Properties..." and click on the overlay
+          window (or any part of the translucent area) to auto-fill its
+          Window class -- this works even without an installed .desktop
+          file. This script sets Qt's applicationName to
+          "runekit-overlay-spike" so the detected class/app_id is easy to
+          recognize if you'd rather type it in directly instead of using
+          Detect.
+       c. Under the "Arrangement & Access" tab, add the "Keep above other
+          windows" property, set it to "Force" / "Yes".
+       d. Apply, then close and re-run this script (rules are most
+          reliably picked up on window creation) and re-check CHECK 1/2
+          with the rule active. Also test against a fullscreen app, since
+          a real KWin bug report found rules not consistently enforced
+          for some properties/activities -- see ROADMAP.md Phase 5.
+       e. Record whether the rule fixed always-on-top reliably, including
+          against a fullscreen window, in ROADMAP.md's Phase 5 section.
+  8. CHECK 5 (multi-monitor spanning, only if you have 2+ monitors): does
      each screen's colored rectangle/label align correctly with that
      physical monitor's actual bounds (no offset/misalignment/gaps)?
 
   The script exits automatically after --duration seconds (default 30),
-  or press Ctrl+C.
+  or use --forever to keep it up indefinitely (needed for CHECK 1b's
+  setup/re-test workflow), and press Ctrl+C to exit.
 
-GO requires all 5 checks to pass -> log the outcome in ROADMAP.md's Phase 5
+GO requires CHECK 1-5 to all pass -> log the outcome in ROADMAP.md's Phase 5
 section (per the project's existing spike-documentation convention -- see
-how Phase 0's GO/NO-GO results were recorded). If any check fails, Track A
-is NO-GO and Phase 5 should proceed to Track B (reintroducing pywayland for
-a minimal wlr-layer-shell/KDE layer-shell client, pending re-approval of
-that dependency per CLAUDE.md).
+how Phase 0's GO/NO-GO results were recorded). If CHECK 1/2 (plain Qt flags)
+fail but CHECK 1b's KWin window-rule workaround reliably fixes always-on-top
+(including against fullscreen windows), that dependency-free workaround may
+be an acceptable substitute for CHECK 1/2 -- record this explicitly, since
+it changes the implementation approach (ship a KWin rule/instructions
+instead of relying on the flag alone) without needing Track B. If neither
+plain flags nor the window-rule workaround are reliable, Track A is NO-GO
+and Phase 5 should proceed to Track B (reintroducing pywayland for a
+minimal wlr-layer-shell/KDE layer-shell client, pending re-approval of that
+dependency per CLAUDE.md).
 """
 import argparse
 import logging
@@ -257,9 +288,24 @@ def main():
         default=30.0,
         help="Seconds to show the overlay before auto-exit (default: 30)",
     )
+    parser.add_argument(
+        "--forever",
+        action="store_true",
+        help=(
+            "Don't auto-exit; keep the overlay up until Ctrl+C. Use this "
+            "while setting up/testing the CHECK 1b KWin window rule "
+            "workaround, since that requires closing and re-opening the "
+            "window to pick up a newly-applied rule."
+        ),
+    )
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
+    # Gives the window a recognizable Wayland app_id/window class for the
+    # CHECK 1b KWin "Detect Window Properties" workflow (see module
+    # docstring) -- without this, Qt defaults to the script's filename.
+    app.setApplicationName("runekit-overlay-spike")
+    app.setDesktopFileName("runekit-overlay-spike")
     signal.signal(signal.SIGINT, lambda *_: app.quit())
 
     log_environment()
@@ -282,12 +328,16 @@ def main():
         handle.activeChanged.connect(report_activation)
 
     print("\n" + "=" * 70)
-    print("Overlay shown. Follow the 5 manual checks described in this")
+    print("Overlay shown. Follow the manual checks described in this")
     print("script's module docstring (open the .py file, or run --help).")
-    print(f"Auto-exiting in {args.duration:.0f}s, or press Ctrl+C.")
+    if args.forever:
+        print("Running with --forever: press Ctrl+C to exit.")
+    else:
+        print(f"Auto-exiting in {args.duration:.0f}s, or press Ctrl+C.")
     print("=" * 70 + "\n")
 
-    QTimer.singleShot(int(args.duration * 1000), app.quit)
+    if not args.forever:
+        QTimer.singleShot(int(args.duration * 1000), app.quit)
 
     exit_code = app.exec()
 

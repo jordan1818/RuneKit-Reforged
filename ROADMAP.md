@@ -442,12 +442,67 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
     draws a per-monitor visual test pattern plus a center click-through
     marker, and auto-detects the click-through failure mode via an
     installed input-event filter. It requires no new dependency (PySide6
-    only, already in `pyproject.toml`) and needs to be run interactively on
-    the real Bazzite/KDE Plasma Wayland machine to judge all 5 GO/NO-GO
-    criteria documented in the script's module docstring (always-on-top vs.
-    normal window, always-on-top vs. fullscreen, click-through,
-    transparent compositing, multi-monitor spanning). Results are not yet
-    recorded here — pending a real-machine run.
+    only, already in `pyproject.toml`).
+  - **Real-machine result (partial, CHECK 1/2 — always-on-top): NO-GO.**
+    On the reference Bazzite/KDE Plasma Wayland machine, the overlay window
+    (built with the exact `DesktopWideOverlay` flag set, including
+    `WindowStaysOnTopHint`) did **not** stay above a normal foreground
+    window. This matches a known upstream limitation:
+    `WindowStaysOnTopHint` is an X11-era hint with no Wayland protocol
+    equivalent — stacking order is a compositor-side decision on Wayland by
+    design, and multiple independent KDE/Qt community reports confirm this
+    flag is unreliable/non-functional on Plasma Wayland specifically.
+    `Qt.WindowType.BypassWindowManagerHint` likewise has no Wayland
+    equivalent (Wayland has no "bypass the compositor" concept).
+  - **Follow-up before committing to Track B**: the script's CHECK 1b adds
+    a dependency-free workaround test — a KWin window rule ("Keep above
+    other windows", forced) matching the overlay's window class/app_id
+    (the script sets `applicationName`/`desktopFileName` to
+    `"runekit-overlay-spike"` to make this easy via KWin's own "Detect
+    Window Properties" picker in System Settings → Window Management →
+    Window Rules). This is worth ruling out first because: (a) it needs no
+    new Python dependency at all, just a KWin config rule RuneKit could
+    write on first run; (b) `KWindowSystem` (KDE Frameworks' own
+    recommended abstraction for "always on top" on Wayland, since KWin
+    exposes no D-Bus interface for it directly) is *also* a C++-only
+    library with no PySide6 binding, so it doesn't avoid the
+    dependency/binding problem either — a plain KWin rule is strictly
+    simpler if it works. Caveat found during research: at least one KWin
+    bug report describes window rules not being consistently enforced for
+    some rule/activity combinations, so reliability (including against a
+    fullscreen window, the real RS3 scenario) needs to be confirmed by hand
+    before relying on it. **Result of this follow-up is not yet recorded —
+    pending a real-machine test of CHECK 1b.**
+  - CHECK 3/4/5 (click-through, transparent compositing, multi-monitor
+    spanning) have not yet been evaluated on the real machine, since
+    CHECK 1/2 already failing means the plain-flags approach is moot unless
+    CHECK 1b's KWin-rule workaround pans out.
+  - **CHECK 1c added: fully self-contained, programmatic alternative to
+    CHECK 1b.** `spike/wayland/test_overlay_kwin_script.py` automates the
+    same "keep above" effect as CHECK 1b's manual KWin window rule, but via
+    KWin's own `org.kde.kwin.Scripting` D-Bus interface instead of a
+    persistent `kwinrulesrc` entry: it writes a small KWin JavaScript
+    snippet to a temp file (matches windows by `resourceClass`/
+    `resourceName` and sets `keepAbove = true`, both for already-open
+    windows and any opened afterward via `workspace.windowAdded`), loads +
+    starts it with `loadScript`/`run`, and `unloadScript`s it on exit —
+    leaving no permanent trace in KWin's config. This uses PyGObject's
+    `Gio`, the **same dependency already approved and in use** for
+    Phases 2-4 (`portal.py`/`globalshortcuts.py`), so it introduces no new
+    dependency at all, unlike Track B's `pywayland`. If reliable (including
+    against a fullscreen window — not yet confirmed on the real machine),
+    this becomes the actual Phase 5 implementation approach: prompt the
+    user once for consent (mirroring the accessibility-permission
+    `QMessageBox` pattern in `runekit/game/quartz/manager.py`), remember
+    the choice via `QSettings` (mirroring `portal.py`'s `restore_token`
+    persistence), then load/unload this KWin script for the app's lifetime.
+    Caveat: KWin's scripting D-Bus interface has no built-in user-consent
+    dialog at the compositor level (unlike the `xdg-desktop-portal`
+    portals used elsewhere in this project) — the RuneKit-side prompt is a
+    courtesy, not a compositor-enforced safeguard, and is the one thing
+    that must be added on top of the spike's approach before production
+    use. **Result of this check is not yet recorded — pending a
+    real-machine run.**
   - Also flagged (separately from the Track A/B decision):
     `DesktopWideOverlay.check_compatibility()`'s black-screen self-test uses
     `QGuiApplication.primaryScreen().grabWindow(0)`, which this roadmap's

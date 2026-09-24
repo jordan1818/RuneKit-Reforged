@@ -427,6 +427,33 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   minimal hand-written Wayland client for `wlr-layer-shell`/KDE's
   layer-shell integration is worth reintroducing `pywayland` for just this
   one phase, and get that dependency re-approved per `CLAUDE.md` if so.
+  - `layer-shell-qt` (KDE's own C++ `LayerShellQt::Window` component) was
+    considered and rejected as a way to avoid the `pywayland` question: it
+    has no PySide6/Shiboken binding, and while it does ship a QML plugin,
+    adopting it would mean introducing a second UI paradigm (QML) alongside
+    this project's existing `QGraphicsView`/Widgets-based overlay
+    (`runekit/game/overlay.py`) just for one platform's surface role — a
+    larger architectural change than either trying Qt's own flags first or
+    reintroducing `pywayland` to bind `zwlr_layer_shell_v1` directly
+    underneath the existing widget stack (via the target `QWindow`'s native
+    handle) if Track A below turns out to be a NO-GO.
+  - **Track A spike script prepared**: `spike/wayland/test_overlay_qt_flags.py`
+    mirrors `DesktopWideOverlay`'s exact window-flag/attribute construction,
+    draws a per-monitor visual test pattern plus a center click-through
+    marker, and auto-detects the click-through failure mode via an
+    installed input-event filter. It requires no new dependency (PySide6
+    only, already in `pyproject.toml`) and needs to be run interactively on
+    the real Bazzite/KDE Plasma Wayland machine to judge all 5 GO/NO-GO
+    criteria documented in the script's module docstring (always-on-top vs.
+    normal window, always-on-top vs. fullscreen, click-through,
+    transparent compositing, multi-monitor spanning). Results are not yet
+    recorded here — pending a real-machine run.
+  - Also flagged (separately from the Track A/B decision):
+    `DesktopWideOverlay.check_compatibility()`'s black-screen self-test uses
+    `QGuiApplication.primaryScreen().grabWindow(0)`, which this roadmap's
+    Feasibility notes already establish does not work on Wayland. This will
+    need its own fix/bypass on the Wayland backend regardless of which
+    overlay track is chosen.
 - Implement a layer-shell-based (or Qt-flags-based, depending on the spike
   above) overlay matching the `DesktopWideOverlay` contract in
   `runekit/game/overlay.py` (`add_instance()` returning a `QGraphicsItem`

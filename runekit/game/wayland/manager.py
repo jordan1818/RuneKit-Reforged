@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Union
 from ..instance import GameInstance
 from ..manager import GameManager
 from .instance import WaylandGameInstance
+from .overlay import WaylandDesktopWideOverlay
 from .portal import ScreenCastPortalError, ScreenCastSession, clear_restore_token
 
 
@@ -27,6 +28,7 @@ class WaylandGameManager(GameManager):
     """
 
     _instances: Dict[int, WaylandGameInstance]
+    overlay: WaylandDesktopWideOverlay
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -34,6 +36,22 @@ class WaylandGameManager(GameManager):
         self._wid_counter = itertools.count(1)
         self._discovery_failed = False
         self.logger = logging.getLogger(__name__ + "." + self.__class__.__name__)
+        self._setup_overlay()
+
+    def _setup_overlay(self):
+        """Create the desktop-wide overlay window (ROADMAP.md Phase 5).
+
+        Mirrors X11GameManager._setup_overlay()/QuartzGameManager's
+        equivalent, but using WaylandDesktopWideOverlay (see overlay.py),
+        which adds a KWin-scripting-based always-on-top workaround on top
+        of the base DesktopWideOverlay's Qt flags (necessary but not
+        sufficient for always-on-top under KWin/Wayland -- validated via
+        spike/wayland/test_overlay_qt_flags.py on a real machine).
+        """
+        self.overlay = WaylandDesktopWideOverlay()
+        self.overlay.show()
+        self.overlay.check_compatibility()
+        self.overlay.setup_keep_above()
 
     def get_instances(self) -> List[GameInstance]:
         if not self._instances and not self._discovery_failed:
@@ -105,4 +123,11 @@ class WaylandGameManager(GameManager):
         for instance in list(self._instances.values()):
             instance.stop()
         self._instances = {}
+
+        self.overlay.stop_keep_above()
+        try:
+            self.overlay.hide()
+            self.overlay.deleteLater()
+        except RuntimeError:
+            pass
 

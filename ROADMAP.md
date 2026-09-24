@@ -7,6 +7,11 @@ Phase 3 complete (window discovery, static geometry, best-effort focus
 tracking implemented and validated on a real KDE Plasma Wayland machine).
 Phase 4 complete (global Alt+1 hotkey implemented and validated on a real
 KDE Plasma Wayland machine).
+Phase 5 feasibility spike complete (GO: Qt window flags + a runtime KWin
+script via org.kde.kwin.Scripting, no pywayland needed -- validated on a
+real KDE Plasma Wayland machine); implementation written
+(runekit/game/wayland/{overlay,kwin_script}.py) but not yet validated on a
+real machine.
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -413,20 +418,37 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   exactly one `alt1_pressed` activation, with no dedicated background
   thread/main loop involved; and Ctrl+C stopped the script cleanly.
 
-### Phase 5 — Desktop-wide overlay
+### Phase 5 — Desktop-wide overlay (spike GO; implementation written, pending real-machine validation)
 
-- **Open question, needs its own spike before implementation**: with
-  `pywayland` dropped from the plan (see Phase 0/Feasibility notes), the
-  layer-shell approach originally proposed for the click-through,
-  always-on-top overlay is no longer assumed. Before implementing this
-  phase, spike whether Qt6's own window flags (`FramelessWindowHint`,
-  `WindowTransparentForInput`, `WindowStaysOnTopHint` — the same flags
-  `DesktopWideOverlay` already uses on X11) produce an acceptable
-  click-through/always-on-top overlay under KWin's Wayland compositor
-  without any layer-shell protocol. If not acceptable, revisit whether a
-  minimal hand-written Wayland client for `wlr-layer-shell`/KDE's
-  layer-shell integration is worth reintroducing `pywayland` for just this
-  one phase, and get that dependency re-approved per `CLAUDE.md` if so.
+**Decision:** no `pywayland`/layer-shell needed. The Wayland overlay is
+implemented as `DesktopWideOverlay`'s existing Qt-flags window (unchanged
+from X11 for click-through/transparent compositing/multi-monitor spanning)
+plus a small KWin JavaScript script — loaded/unloaded at runtime via KWin's
+own `org.kde.kwin.Scripting`/`org.kde.kwin.Script` D-Bus interfaces using
+PyGObject's `Gio` (already an approved, in-use dependency from Phases 2-4)
+— to force `keepAbove = true` on the overlay window, working around
+`WindowStaysOnTopHint`'s known unreliability on Wayland. **Validated
+end-to-end on the real Bazzite/KDE Plasma Wayland machine: always-on-top
+(incl. vs. fullscreen), click-through, transparent compositing, and
+multi-monitor spanning (3-display setup) all confirmed working.** No new
+dependency, no permanent KWin config file changes. See the spike history
+below for the full investigation trail.
+
+<details>
+<summary>Spike history (Track A investigation, click to expand)</summary>
+
+- **Original open question**: with `pywayland` dropped from the plan (see
+  Phase 0/Feasibility notes), the layer-shell approach originally proposed
+  for the click-through, always-on-top overlay was no longer assumed.
+  Before implementing this phase, spike whether Qt6's own window flags
+  (`FramelessWindowHint`, `WindowTransparentForInput`,
+  `WindowStaysOnTopHint` — the same flags `DesktopWideOverlay` already uses
+  on X11) produce an acceptable click-through/always-on-top overlay under
+  KWin's Wayland compositor without any layer-shell protocol. If not
+  acceptable, revisit whether a minimal hand-written Wayland client for
+  `wlr-layer-shell`/KDE's layer-shell integration is worth reintroducing
+  `pywayland` for just this one phase, and get that dependency re-approved
+  per `CLAUDE.md` if so.
   - `layer-shell-qt` (KDE's own C++ `LayerShellQt::Window` component) was
     considered and rejected as a way to avoid the `pywayland` question: it
     has no PySide6/Shiboken binding, and while it does ship a QML plugin,
@@ -501,7 +523,8 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
     portals used elsewhere in this project) — the RuneKit-side prompt is a
     courtesy, not a compositor-enforced safeguard, and is the one thing
     that must be added on top of the spike's approach before production
-    use.
+    use. This consent flow still needs to be designed/implemented in
+    production code (see the concrete implementation task list below).
   - **Fix note (found during first real-machine run):** the first version
     of `test_overlay_kwin_script.py` called `run()` on the wrong D-Bus
     object: it used `/{script_id}` (e.g. `/2`) with the
@@ -518,19 +541,89 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
     interface, which only handles `loadScript`/`unloadScript`/
     `isScriptLoaded`. Fixed by calling `run()` against
     `/Scripting/Script{script_id}` with the `org.kde.kwin.Script`
-    interface. **Result of this check (with the fix applied) is not yet
-    recorded — pending a re-run on the real machine.**
-  - Also flagged (separately from the Track A/B decision):
+    interface.
+  - **Final real-machine result, all checks: GO.** With the fix above
+    applied, `test_overlay_kwin_script.py` was re-run on the reference
+    Bazzite/KDE Plasma Wayland (3-display) machine and confirmed: (1) the
+    KWin script loaded and matched the window (`"keepAbove set on ..."`
+    printed); (2) always-on-top held reliably against both a normal window
+    and a **fullscreen** window (the real RS3 scenario); (3) click-through
+    worked (no input events landed on the overlay); (4) transparent
+    compositing rendered correctly with no black/opaque artifacts; (5) the
+    per-monitor test pattern aligned correctly across all 3 displays. No
+    remaining blockers — Track B (`pywayland`) is not needed.
+  - Also flagged (separately, still applies regardless of the GO above):
     `DesktopWideOverlay.check_compatibility()`'s black-screen self-test uses
     `QGuiApplication.primaryScreen().grabWindow(0)`, which this roadmap's
     Feasibility notes already establish does not work on Wayland. This will
-    need its own fix/bypass on the Wayland backend regardless of which
-    overlay track is chosen.
-- Implement a layer-shell-based (or Qt-flags-based, depending on the spike
-  above) overlay matching the `DesktopWideOverlay` contract in
-  `runekit/game/overlay.py` (`add_instance()` returning a `QGraphicsItem`
-  plus a disconnect callback), so `Host`, `App`, and window/UI code require
-  no changes.
+    need its own fix/bypass on the Wayland backend (see task list below).
+
+</details>
+
+**Implementation status: code written, pending real-machine validation.**
+
+- `runekit/game/wayland/kwin_script.py` — promoted
+  `spike/wayland/test_overlay_kwin_script.py`'s `KWinScriptSession` into
+  production as `KeepAboveKWinScript` (deferred `import gi`, a
+  `KWinScriptError` exception class, logging instead of `print()`, matching
+  `portal.py`'s conventions). Also holds `load_keep_above_consent()`/
+  `save_keep_above_consent()` (`QSettings` key
+  `wayland/kwinKeepAboveConsent`, mirroring `portal.py`'s `restore_token`
+  persistence style). **Difference from the spike:** matches windows by Qt
+  `windowTitle()`/KWin `caption` (a unique per-window sentinel string, see
+  below), not `resourceClass`/`resourceName` (the Wayland app_id) — the
+  spike script was itself the whole app, but RuneKit's overlay window
+  shares its real app_id with every other RuneKit window (main app windows,
+  settings dialog), so app_id-matching would have forced literally every
+  RuneKit window always-on-top.
+- `runekit/game/wayland/overlay.py` — new `WaylandDesktopWideOverlay(
+  DesktopWideOverlay)`. Sets a unique `windowTitle()` (
+  `"__runekit_wayland_overlay__"`) for `kwin_script.py` to match against;
+  `setup_keep_above()` shows the one-time consent `QMessageBox` (mirroring
+  the accessibility-permission prompt pattern in
+  `runekit/game/quartz/manager.py`), loads `KeepAboveKWinScript` if
+  consented (idempotent — safe to call again after `repick_window()`
+  without re-prompting or reloading), and degrades gracefully (logs a
+  warning, keeps the overlay usable without forced always-on-top) if the
+  user declines or `KWinScriptError` is raised; `stop_keep_above()` unloads
+  it. Also overrides `check_compatibility()` to skip the base class's
+  black-screen self-test (`QGuiApplication.primaryScreen().grabWindow(0)`,
+  confirmed non-functional on Wayland per the Feasibility notes) rather
+  than let it misfire and disable an otherwise-working overlay.
+- `runekit/game/wayland/manager.py` — `WaylandGameManager._setup_overlay()`
+  (called from `__init__`, mirroring `X11GameManager`/`QuartzGameManager`)
+  constructs the `WaylandDesktopWideOverlay`, calls `.show()`/
+  `.check_compatibility()`/`.setup_keep_above()`. `stop()` calls
+  `overlay.stop_keep_above()` before hiding/deleting it.
+- `runekit/game/wayland/instance.py` — `WaylandGameInstance._setup_overlay()`
+  (called from `__init__`, after `self._position` is resolved — see fix
+  note below) registers with `self.manager.overlay.add_instance(self)`,
+  matching `X11GameInstance`'s pattern; `get_overlay_area()` now returns
+  `self.overlay` instead of raising `NotImplementedError`; `stop()` calls
+  the stored disconnect callback (idempotently, alongside the existing
+  `_stopped` guard).
+- **Fix note (found while smoke-testing the wiring, before any real-machine
+  run):** `_setup_overlay()` must run *after* `self._position` is
+  initialized in `__init__`, not before — `DesktopWideOverlay.add_instance()`
+  (`runekit/game/overlay.py`) calls `get_position()` immediately to place
+  the new overlay item, which reads `self._position`; calling
+  `_setup_overlay()` too early raised `AttributeError:
+  'WaylandGameInstance' object has no attribute '_position'`. Also added an
+  eager `self._overlay_disconnect = None` before that point so `stop()`
+  (which unconditionally checks `_overlay_disconnect`) can't hit an
+  `AttributeError` if construction fails partway through.
+- `runekit/game/wayland/manual_validate_overlay.py` — new manual validation
+  script (mirroring Phases 2-4's `manual_validate_*.py` convention, since
+  this project has no automated test suite), exercising the real
+  `WaylandGameManager`/`WaylandGameInstance`/`WaylandDesktopWideOverlay`
+  classes end-to-end: window discovery, consent prompt, overlay placement,
+  and manual always-on-top/click-through checks against a real picked
+  window. **Not yet run on the real machine** — offline smoke-testing (this
+  dev environment lacks PyGObject/a Wayland session) confirmed the classes
+  construct, wire together, and tear down correctly (including
+  `stop()`/`__del__` idempotency), but the actual KWin D-Bus behavior and
+  on-screen result still need real-machine confirmation, same as every
+  other phase in this roadmap.
 
 ### Phase 6 — Integration & regression
 

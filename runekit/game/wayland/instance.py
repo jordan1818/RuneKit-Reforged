@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QGuiApplication
@@ -84,6 +84,7 @@ class WaylandGameInstance(GameInstance):
     """
 
     overlay: QGraphicsItem
+    _overlay_disconnect: Optional[Callable[[], None]]
     refresh_rate = 100
 
     def __init__(
@@ -105,6 +106,7 @@ class WaylandGameInstance(GameInstance):
         self._game_last_grab = 0.0
         self._game_last_image = None
         self._stopped = False
+        self._overlay_disconnect = None
 
         # Cached, static geometry. There is no on-screen x/y for WINDOW-type
         # ScreenCast streams, so this is always anchored at (0, 0) -- a
@@ -119,6 +121,11 @@ class WaylandGameInstance(GameInstance):
             self._position: Optional[QRect] = QRect(0, 0, width, height)
         else:
             self._position = None
+
+        # Must run after self._position is set above: add_instance() (see
+        # runekit/game/overlay.py) calls get_position() immediately to
+        # place this instance's overlay item, which reads self._position.
+        self._setup_overlay()
 
         self._is_focused = (
             QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive
@@ -142,6 +149,11 @@ class WaylandGameInstance(GameInstance):
             self.logger.warning(
                 "Wayland Alt+1 hotkey unavailable: %s", exc
             )
+
+    def _setup_overlay(self):
+        """Register this instance with the manager's desktop-wide overlay
+        (ROADMAP.md Phase 5). Mirrors X11GameInstance._setup_overlay()."""
+        self.overlay, self._overlay_disconnect = self.manager.overlay.add_instance(self)
 
     def get_position(self) -> QRect:
         if self._position is None:
@@ -312,6 +324,10 @@ class WaylandGameInstance(GameInstance):
             return
         self._stopped = True
 
+        if self._overlay_disconnect is not None:
+            self._overlay_disconnect()
+            self._overlay_disconnect = None
+
         self._hotkey_session.close()
 
         if self._capture_pipeline is not None:
@@ -328,6 +344,4 @@ class WaylandGameInstance(GameInstance):
         self.stop()
 
     def get_overlay_area(self) -> QGraphicsItem:
-        raise NotImplementedError(
-            "Wayland overlay not implemented yet (see ROADMAP.md Phase 5)"
-        )
+        return self.overlay

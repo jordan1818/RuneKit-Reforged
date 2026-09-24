@@ -5,6 +5,8 @@ detection & scaffolding implemented). Phase 2 complete (screen capture
 pipeline implemented and validated on a real KDE Plasma Wayland machine).
 Phase 3 complete (window discovery, static geometry, best-effort focus
 tracking implemented and validated on a real KDE Plasma Wayland machine).
+Phase 4 complete (global Alt+1 hotkey implemented and validated on a real
+KDE Plasma Wayland machine).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -334,15 +336,82 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   `get_active_instance()` correctly returned the same instance as
   `get_instances()[0]`.
 
-### Phase 4 — Global hotkey (Alt+1)
+### Phase 4 — Global hotkey (Alt+1) ✅ COMPLETE
 
-- Implement an `org.freedesktop.portal.GlobalShortcuts` session
-  (`CreateSession` → `BindShortcuts`), listen for the `Activated` signal, and
-  emit the existing `GameInstance.alt1_pressed` signal — using PyGObject's
-  `Gio` exclusively, same pattern as Phase 2. Validated in
-  `spike/wayland/test_globalshortcuts_portal.py`. Requires
-  `xdg-desktop-portal-kde` >= Plasma 6.1; detect and gracefully no-op (log a
-  warning) if the portal interface is unavailable on older Plasma.
+- Implemented the `org.freedesktop.portal.GlobalShortcuts` session flow
+  (`CreateSession` → `BindShortcuts`) in `runekit/game/wayland/globalshortcuts.py`
+  (`GlobalShortcutsSession`), using PyGObject's `Gio` exclusively — same
+  pattern as Phase 2/3's `ScreenCastSession` (`portal.py`), including reusing
+  the shared `PortalRequest` helper (`portal.py`'s `_signature_for` gained a
+  `BindShortcuts` entry). Listens for the `Activated` D-Bus signal and emits
+  it as the existing `GameInstance.alt1_pressed` signal, connected in
+  `WaylandGameInstance.__init__` (`runekit/game/wayland/instance.py`).
+  `GlobalShortcutsSession.open()` is called synchronously and eagerly in
+  `WaylandGameInstance.__init__` (unlike screen capture, which is lazy,
+  since there's no other natural trigger for it) — this may show KDE's
+  one-time shortcut-grant dialog. If the portal interface or `BindShortcuts`
+  is unavailable/declined (e.g. pre-Plasma 6.1), `open()` raises
+  `GlobalShortcutsPortalError`, which `WaylandGameInstance.__init__` catches
+  and logs as a warning, continuing without the hotkey rather than breaking
+  the rest of the Wayland backend. Validated in
+  `spike/wayland/test_globalshortcuts_portal.py`.
+- **Does not run at RuneKit startup.** `WaylandGameManager` never calls
+  `get_instances()`/`get_active_instance()` eagerly (unlike
+  `X11GameManager`, whose `__init__` does), so `WaylandGameInstance.__init__`
+  — and therefore the `GlobalShortcuts` grant dialog above — only runs the
+  first time something triggers window discovery (per Phase 3), typically
+  the first time a user launches an app via `Host.launch_app()`. Plain
+  RuneKit startup (tray icon only, no app launched) never touches the game
+  manager at all, so this cannot block app startup itself; it blocks the
+  first app-launch action the same way Phase 3's window picker already does,
+  now with one more sequential dialog after it.
+- **Fix note (threading model, found during real-machine validation): do
+  not run the portal Request/Response wait or the `Activated` signal
+  subscription on a background `QThread` with its own `GLib.MainLoop()`.**
+  An initial implementation mirrored `WaylandCaptureWorker`'s (`capture.py`)
+  QThread pattern, running the whole `CreateSession` → `BindShortcuts` →
+  `Activated` flow on a background thread. This does not work: `GLib.MainLoop()`
+  called with no explicit context always binds to the *global default*
+  `GMainContext`, never to a thread-default context set via
+  `push_thread_default()` (GLib's own docs note `push_thread_default()`
+  "does not affect... the context used by functions like `g_idle_add()`",
+  and `g_timeout_add()`/`g_main_loop_new(NULL)` follow the same rule). Qt's
+  main thread already continuously iterates that same global default
+  context once `app.exec()` is running (PySide6's glib event-dispatcher
+  integration on Linux), so a second `GLib.MainLoop()` on a second thread
+  trying to run that same global context is racy by construction. Pushing a
+  private `GMainContext` on the worker thread does not fix this either:
+  `Gio.DBusConnection.signal_subscribe()`'s callback dispatch *does* follow
+  the subscribing thread's thread-default context, so doing so only made
+  the `Response`/`Activated` subscriptions land in a context nothing was
+  ever iterating, while the unmodified `PortalRequest`'s `loop.run()` kept
+  waiting on the global default context instead. Observed symptom:
+  `CreateSession` timed out after 60s with no error and no KDE dialog ever
+  appeared, even though the equivalent flow worked in
+  `spike/wayland/test_globalshortcuts_portal.py` (a standalone process with
+  no competing Qt event loop, so no context contention). **Fixed** by
+  dropping the background thread entirely: `GlobalShortcutsSession.open()`
+  runs `CreateSession`/`BindShortcuts` synchronously on the caller's (main)
+  thread, exactly like `ScreenCastSession.open()` already does successfully.
+  No dedicated loop/thread is needed for the ongoing `Activated` listening
+  either, since the signal subscription registered from the main thread
+  lands on the global default context that Qt's own event loop is already
+  driving for the app's whole lifetime.
+- **Fix note (minor, `portal.py`):** `PortalRequest.call()`'s `finally`
+  block unconditionally called `GLib.source_remove(timeout_id)`, but a fired
+  timeout callback returning `False` already tells GLib to auto-destroy that
+  source, so removing it again on the timeout path logged a harmless but
+  noisy `Source ID N was not found when attempting to remove it` warning.
+  Fixed with a `timed_out` flag so removal is only attempted on the normal
+  (non-timeout) response path.
+- Validated end-to-end on a real Bazzite/KDE Plasma Wayland machine via
+  `runekit/game/wayland/manual_validate_hotkey.py` (a manual validation
+  script mirroring Phases 2/3's `manual_validate_capture.py`/
+  `manual_validate_discovery.py`, since this project has no automated test
+  suite): the KDE shortcut-grant dialog appeared once, synchronously, before
+  the script's "Bound successfully" message; each Alt+1 press printed
+  exactly one `alt1_pressed` activation, with no dedicated background
+  thread/main loop involved; and Ctrl+C stopped the script cleanly.
 
 ### Phase 5 — Desktop-wide overlay
 

@@ -123,7 +123,20 @@ class PortalRequest:
             self._on_response,
         )
 
+        # Fix note: when _on_timeout fires it returns False, which tells
+        # GLib to auto-destroy that timeout source on its own -- so an
+        # unconditional GLib.source_remove(timeout_id) in the `finally`
+        # below would then try to remove an already-destroyed source on
+        # the timeout path, logging a harmless but noisy
+        # "Source ID N was not found when attempting to remove it"
+        # warning. The `_timed_out` flag lets the `finally` skip the
+        # removal in that case while still removing the still-live timer
+        # on the normal (fast) response path.
+        timed_out = False
+
         def _on_timeout():
+            nonlocal timed_out
+            timed_out = True
             logger.warning(
                 "Timed out waiting for %s response after %ds", method_name, timeout_sec
             )
@@ -149,7 +162,8 @@ class PortalRequest:
 
             self.loop.run()
         finally:
-            GLib.source_remove(timeout_id)
+            if not timed_out:
+                GLib.source_remove(timeout_id)
             self.bus.signal_unsubscribe(self._sub_id)
 
         return self.response_code, self.results

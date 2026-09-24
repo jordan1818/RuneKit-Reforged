@@ -58,6 +58,33 @@ class GlobalShortcutsWorker(QObject):
         gi.require_version("GLib", "2.0")
         from gi.repository import Gio, GLib
 
+        # Run all of this worker's D-Bus/GLib work against a private
+        # GMainContext, pushed as *this thread's* thread-default context,
+        # rather than the implicit global default context.
+        #
+        # Fix note (found during real-machine validation): Qt's own main
+        # thread already iterates the global default GMainContext once
+        # QCoreApplication.exec()/app.exec() is running (via its glib
+        # event-dispatcher integration on Linux) -- see PyGObject's own
+        # threading docs ("the default main context... should only be
+        # iterated from the main thread"). Without a private context here,
+        # this worker's Gio.bus_get_sync() connection and its
+        # signal_subscribe()/GLib.MainLoop() calls attach to that same
+        # shared global context, so the two threads contend over
+        # dispatching it. Observed symptom: CreateSession's Response
+        # signal was never delivered to this thread and the call timed out
+        # after 60s with no error, even though the D-Bus call itself
+        # reached the portal -- ScreenCastSession.open() (portal.py) never
+        # hit this because it always runs synchronously on the *main*
+        # thread instead of a background QThread. See ROADMAP.md Phase 4.
+        context = GLib.MainContext.new()
+        context.push_thread_default()
+        try:
+            self._run(Gio, GLib)
+        finally:
+            context.pop_thread_default()
+
+    def _run(self, Gio, GLib):
         try:
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             proxy = Gio.DBusProxy.new_sync(

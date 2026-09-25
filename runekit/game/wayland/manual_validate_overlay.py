@@ -61,9 +61,10 @@ Report back GO/NO-GO so ROADMAP.md Phase 5 can be marked complete or fixed.
 """
 import argparse
 import logging
+import signal
 import sys
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtGui import QColor, QBrush, QPen
 from PySide6.QtWidgets import QApplication, QGraphicsRectItem, QGraphicsTextItem
 
@@ -117,6 +118,22 @@ def main():
     app.setOrganizationDomain("cupco.de")
     app.setApplicationName("RuneKit")
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+
+    # Ctrl+C (SIGINT) is not delivered promptly while control is inside
+    # Qt's C++ event loop (app.exec()) -- Python's signal handler only runs
+    # between bytecode instructions, which doesn't happen there. Mirrors
+    # runekit/main.py's workaround: install a SIGINT handler that calls
+    # app.quit(), plus a periodic no-op QTimer to force Qt to briefly hand
+    # control back to the Python interpreter often enough for that handler
+    # to actually fire. Without this, Ctrl+C appears to do nothing and the
+    # window must be force-closed instead -- which also means
+    # manager.stop() (and therefore KeepAboveKWinScript.unload()) never
+    # runs, leaving the temporary KWin script loaded until its matched
+    # window closes and its /tmp .js file undeleted.
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    timer = QTimer()
+    timer.start(300)
+    timer.timeout.connect(lambda: None)
 
     if args.reset_consent:
         QSettings().remove(KEEP_ABOVE_CONSENT_SETTINGS_KEY)

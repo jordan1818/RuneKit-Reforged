@@ -7,11 +7,9 @@ Phase 3 complete (window discovery, static geometry, best-effort focus
 tracking implemented and validated on a real KDE Plasma Wayland machine).
 Phase 4 complete (global Alt+1 hotkey implemented and validated on a real
 KDE Plasma Wayland machine).
-Phase 5 feasibility spike complete (GO: Qt window flags + a runtime KWin
-script via org.kde.kwin.Scripting, no pywayland needed -- validated on a
-real KDE Plasma Wayland machine); implementation written
-(runekit/game/wayland/{overlay,kwin_script}.py) but not yet validated on a
-real machine.
+Phase 5 complete (desktop-wide overlay implemented via Qt window flags + a
+runtime KWin script over org.kde.kwin.Scripting, no pywayland needed;
+validated end-to-end on a real KDE Plasma Wayland machine).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -418,7 +416,7 @@ portal's own picker + cached `restore_token`, not `plasmawindowmanagement`.
   exactly one `alt1_pressed` activation, with no dedicated background
   thread/main loop involved; and Ctrl+C stopped the script cleanly.
 
-### Phase 5 — Desktop-wide overlay (spike GO; implementation written, pending real-machine validation)
+### Phase 5 — Desktop-wide overlay ✅ COMPLETE
 
 **Decision:** no `pywayland`/layer-shell needed. The Wayland overlay is
 implemented as `DesktopWideOverlay`'s existing Qt-flags window (unchanged
@@ -618,12 +616,11 @@ below for the full investigation trail.
   `WaylandGameManager`/`WaylandGameInstance`/`WaylandDesktopWideOverlay`
   classes end-to-end: window discovery, consent prompt, overlay placement,
   and manual always-on-top/click-through checks against a real picked
-  window. **Not yet run on the real machine** — offline smoke-testing (this
-  dev environment lacks PyGObject/a Wayland session) confirmed the classes
+  window. Before the real-machine run, offline smoke-testing (this dev
+  environment lacks PyGObject/a Wayland session) confirmed the classes
   construct, wire together, and tear down correctly (including
-  `stop()`/`__del__` idempotency), but the actual KWin D-Bus behavior and
-  on-screen result still need real-machine confirmation, same as every
-  other phase in this roadmap.
+  `stop()`/`__del__` idempotency); see the fix notes and final result below
+  for the actual real-machine run.
 - **Fix note (found during first real-machine run of
   `manual_validate_overlay.py`):** the script initially produced no visible
   on-screen change at all, even though the `ScreenCast` portal correctly
@@ -645,6 +642,27 @@ below for the full investigation trail.
   `draw_test_pattern()` helper), and gained a `--reset-consent` flag to
   force the consent dialog to reappear for testing, since the remembered
   answer otherwise persists across runs.
+- **Fix note (found during real-machine validation): Ctrl+C did not stop
+  the script.** `try: app.exec() except KeyboardInterrupt` does not work
+  reliably with PySide6/Qt: SIGINT is only actually handled by Python
+  between bytecode instructions, which never happens while control is
+  inside Qt's C++ event loop (`app.exec()`). `runekit/main.py` (the real
+  app) already avoids this correctly via `signal.signal(signal.SIGINT,
+  lambda no, frame: app.quit())` plus a periodic no-op `QTimer` that
+  forces Qt to briefly hand control back to the Python interpreter often
+  enough for the handler to fire -- this script never had that workaround.
+  **Impact:** forcibly closing the window instead of a clean shutdown
+  means `WaylandGameManager.stop()` (and therefore
+  `KeepAboveKWinScript.unload()`) never runs, leaving the temporary KWin
+  script loaded (harmlessly, until its matched window closes and stops
+  matching anything) and its `/tmp` `.js` file undeleted until next reboot
+  -- not a correctness issue with the overlay/always-on-top mechanism
+  itself, just an untidy shutdown in this validation script. **Fixed:**
+  added the same `signal.signal`/`QTimer` pattern as `main.py`.
+- **Real-machine validation: GO, all 6 checks passed** (consent dialog,
+  correct overlay placement, always-on-top against both a normal and a
+  fullscreen window, click-through, and — after the Ctrl+C fix above —
+  clean shutdown/re-run behavior). **Phase 5 is complete.**
 
 ### Phase 6 — Integration & regression
 

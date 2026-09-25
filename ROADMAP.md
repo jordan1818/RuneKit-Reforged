@@ -624,6 +624,27 @@ below for the full investigation trail.
   `stop()`/`__del__` idempotency), but the actual KWin D-Bus behavior and
   on-screen result still need real-machine confirmation, same as every
   other phase in this roadmap.
+- **Fix note (found during first real-machine run of
+  `manual_validate_overlay.py`):** the script initially produced no visible
+  on-screen change at all, even though the `ScreenCast` portal correctly
+  picked a window and `WaylandGameManager`/`WaylandGameInstance` constructed
+  successfully — easy to mistake for "nothing is working." Root cause: the
+  `QGraphicsRectItem` returned by `get_overlay_area()`/`add_instance()`
+  (`runekit/game/overlay.py`) is deliberately drawn with a fully transparent
+  pen and no brush — it's an **invisible bare container**, by design;
+  real Alt1 apps draw their own visible content (rects/text/images) as
+  children of it via `OverlayApi` (`runekit/browser/overlay.py`), and the
+  script never drew anything on top of it, unlike the earlier
+  `spike/wayland/test_overlay_*.py` scripts, which painted a visible test
+  pattern directly. Also, the consent dialog not reappearing on a second
+  run is expected behavior, not a bug — `wayland/kwinKeepAboveConsent` is
+  a one-time, permanently-remembered `QSettings` value (see
+  `kwin_script.py`). **Fixed:** `manual_validate_overlay.py` now draws a
+  visible red-bordered `QGraphicsRectItem` + `QGraphicsTextItem` as
+  children of the real overlay item after a window is picked (via a new
+  `draw_test_pattern()` helper), and gained a `--reset-consent` flag to
+  force the consent dialog to reappear for testing, since the remembered
+  answer otherwise persists across runs.
 
 ### Phase 6 — Integration & regression
 

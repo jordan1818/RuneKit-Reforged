@@ -1,6 +1,6 @@
 import abc
 import time
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Union
 
 import numpy as np
 from PIL import Image
@@ -88,6 +88,24 @@ class GameInstance(QObject):
 
     def embed_window(self, window: QWindow):
         pass
+
+    def keep_window_above(self, window: QWindow) -> Optional[Callable[[], None]]:
+        """Best-effort request to keep an app window (e.g. AppWindow, see
+        runekit/app/view/window.py) above the game window, in addition to
+        whatever always-on-top mechanism AppWindow already applies via Qt
+        window flags (Qt.WindowType.WindowStaysOnTopHint).
+
+        No-op by default: on X11/macOS that Qt flag is sufficient on its
+        own (see runekit/game/x11, runekit/game/quartz), so there is
+        nothing extra to do here. WaylandGameInstance overrides this,
+        since Qt.WindowType.WindowStaysOnTopHint does not reliably hold
+        under KWin/Wayland -- see ROADMAP.md Phase 5/6.
+
+        Returns an optional zero-arg callable to undo/release whatever
+        this set up (e.g. unloading a helper script), or None if there is
+        nothing to undo. Callers should invoke it when the window closes.
+        """
+        return None
 
     def get_overlay_area(self) -> QGraphicsItem:
         raise NotImplementedError

@@ -10,6 +10,9 @@ KDE Plasma Wayland machine).
 Phase 5 complete (desktop-wide overlay implemented via Qt window flags + a
 runtime KWin script over org.kde.kwin.Scripting, no pywayland needed;
 validated end-to-end on a real KDE Plasma Wayland machine).
+Phase 6 (integration & regression) implemented -- extends the Phase 5
+always-on-top KWin script to Alt1 app windows themselves, not just the
+overlay -- pending real-machine validation.
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -666,10 +669,99 @@ below for the full investigation trail.
 
 ### Phase 6 — Integration & regression
 
-- Wire the Wayland backend into `Host`/`App`/UI code paths
-  (`runekit/host/host.py`, `runekit/app/app.py`,
-  `runekit/app/view/*`, `runekit/ui/*`).
-- Verify the existing X11 path is completely unaffected by these changes.
+**Implementation status: code written, pending real-machine validation.**
+
+Most of `Host`/`App`/UI (`runekit/app/app.py`, `runekit/app/view/*`,
+`runekit/ui/game_snap.py`, `runekit/browser/*`) already worked against the
+Wayland backend as a side effect of Phases 1-5's `GameManager`/
+`GameInstance` ABC design (see `DESIGN.md`): only `runekit/host/host.py`
+(`supports_repick_window()`/`repick_window()`) and `runekit/ui/tray.py`
+(the conditional "Re-pick game window" menu action) needed Wayland-aware
+changes before this phase, both purely additive and already covered by
+Phase 3. This phase closes the remaining gaps found by auditing every
+`game_instance.*`/`GameInstance` call site outside `runekit/game/`:
+
+- **`AppWindow` always-on-top gap.** `runekit/app/view/window.py` sets
+  `Qt.WindowType.WindowStaysOnTopHint` on every Alt1 app window, but
+  Phase 5's own spike (`spike/wayland/test_overlay_qt_flags.py`) already
+  proved this flag does not reliably hold under KWin/Wayland -- that's
+  why the desktop-wide overlay needed the `KeepAboveKWinScript` workaround
+  in the first place. That workaround was only wired up for the overlay
+  window, not for Alt1 app windows, so app windows were still at risk of
+  being buried under the game window on Wayland. Fixed with a new generic
+  hook, `GameInstance.keep_window_above(window: QWindow) ->
+  Optional[Callable[[], None]]` (`runekit/game/instance.py`), no-op by
+  default (X11/Quartz's existing Qt flag is already sufficient there, so
+  they don't override it). `AppWindow.__init__` calls a new
+  `_setup_keep_above()` (after `winId()`/`windowHandle()`, mirroring the
+  native-window forcing already done for `embed_window()` in
+  `runekit/app/app.py`), which calls `keep_window_above()` and, if it
+  returns an undo callback, connects it to the window's `destroyed`
+  signal so the helper is released when the app window closes.
+  `WaylandGameInstance.keep_window_above()` (`runekit/game/wayland/
+  instance.py`) implements this by reusing `KeepAboveKWinScript`
+  (`kwin_script.py`, promoted for the overlay in Phase 5) keyed by the
+  app window's own title (KWin matches by caption, not Wayland app_id --
+  see `kwin_script.py`'s module docstring) rather than prompting for
+  consent again: it reuses the same one-time, `QSettings`-remembered
+  `wayland/kwinKeepAboveConsent` answer already asked when the overlay was
+  set up, degrading gracefully (logging a warning, keeping the window
+  usable without the reinforcement) if consent was declined or the script
+  fails to load. `WaylandGameInstance.stop()` also unloads any of these
+  per-app-window scripts still tracked (defensive cleanup in case a
+  window's `destroyed` signal never fired before manager teardown).
+- **`get_world()` gap, documented (not fixable).** `X11GameInstance` mixes
+  in `PsUtilNetStat` (`runekit/game/psutil_mixins.py`) to detect the
+  current world from the game process's network connections via its PID.
+  `WaylandGameInstance.get_world()` returns `None` unconditionally,
+  because the `ScreenCast` portal's `WINDOW` picker never exposes the
+  picked window's owning PID to the caller (by design -- it's meant to
+  work for sandboxed/Flatpak clients too, which may not even share the
+  caller's PID namespace), so `PsUtilNetStat`'s `psutil.Process(pid)`
+  lookup has nothing to key off. Documented in code as an accepted
+  Wayland limitation rather than a bug: `alt1.currentWorld` will report
+  unknown (`-1`) for Alt1 apps on this backend, degrading gracefully
+  rather than crashing (see `runekit/browser/api.py`'s `get_world()`,
+  which already wraps the call in `try/except Exception: return -1`, so
+  no browser-side change was needed).
+- **App window positioning/overlay content, confirmed by design, not
+  changed.** `GameSnapMixin.snap_to_game()` (`runekit/ui/game_snap.py`)
+  and `OverlayApi` (`runekit/browser/overlay.py`) both consume
+  `get_position()`/`get_overlay_area()` exactly as X11/Quartz do, with no
+  Wayland-specific code needed -- app windows and overlay-drawn content
+  will appear anchored at `WaylandGameInstance`'s static `(0, 0)`-origin
+  rect (per Phase 3's accepted limitation), not at the picked window's
+  real on-screen position. This is expected, not a regression to fix
+  here.
+- New `runekit/game/wayland/manual_validate_integration.py` -- unlike
+  Phases 2-5's `manual_validate_*.py` scripts (which each exercise
+  `runekit/game/wayland/*` classes directly), this drives the real
+  `runekit.main` code path end-to-end: `QApplication` -> `Host` -> a real
+  `App`/`AppWindow`/QtWebEngine browser, launching an actual Alt1 app
+  manifest URL, to validate the integration wiring above together rather
+  than in isolation. Before the real-machine run, offline smoke-testing
+  (this dev environment lacks PyGObject/a Wayland session) confirmed
+  `AppWindow._setup_keep_above()` calls `GameInstance.keep_window_above()`
+  and correctly wires its returned undo callback to the window's
+  `destroyed` signal (verified with a fake `GameInstance` standing in for
+  `WaylandGameInstance`); see the real-machine validation result below.
+- X11 regression: confirmed by inspection rather than a live X11 run --
+  `git diff main...support-wayland -- runekit/game/x11` is empty, and the
+  only non-`runekit/game/` files touched by the whole Wayland branch
+  before this phase (`runekit/host/host.py`, `runekit/ui/tray.py`) gate
+  their new behavior behind `hasattr(self.manager, "repick_window")`,
+  which is `False` for `X11GameManager`. This phase's new
+  `GameInstance.keep_window_above()` hook defaults to a no-op returning
+  `None`, and `X11GameInstance`/`QuartzGameInstance` do not override it,
+  so `AppWindow._setup_keep_above()` is a harmless no-op on X11/macOS.
+
+**Pending:** real-machine validation on the Bazzite/KDE Plasma Wayland
+machine via `manual_validate_integration.py`, launching a real Alt1 app
+end-to-end and confirming the app window stays above the game window
+(including fullscreen), the overlay/hotkey still work together with it,
+and no regressions appear in `runekit.log`. See that script's docstring
+for the full manual-check list. Report back GO/NO-GO so this phase can be
+marked complete.
 
 ### Phase 7 — Packaging
 

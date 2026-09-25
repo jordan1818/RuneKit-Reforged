@@ -4,13 +4,14 @@ import time
 from typing import TYPE_CHECKING, Callable, Optional
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtWidgets import QGraphicsItem
 
 from runekit.image.np_utils import np_crop
 from ..instance import GameInstance, ImageType
 from .capture import WaylandCapturePipeline
 from .globalshortcuts import GlobalShortcutsPortalError, GlobalShortcutsSession
+from .kwin_script import KeepAboveKWinScript, KWinScriptError, load_keep_above_consent
 from .portal import ScreenCastSession
 
 if TYPE_CHECKING:
@@ -107,6 +108,11 @@ class WaylandGameInstance(GameInstance):
         self._game_last_image = None
         self._stopped = False
         self._overlay_disconnect = None
+        # Tracks KWin always-on-top scripts loaded on behalf of app windows
+        # via keep_window_above() (ROADMAP.md Phase 6), keyed by id(window),
+        # so stop() can unload any still-loaded ones (e.g. a window that
+        # never fired its destroyed signal before shutdown).
+        self._app_window_keep_above_scripts = {}
 
         # Cached, static geometry. There is no on-screen x/y for WINDOW-type
         # ScreenCast streams, so this is always anchored at (0, 0) -- a
@@ -260,6 +266,18 @@ class WaylandGameInstance(GameInstance):
             self.focusChanged.emit(focused)
 
     def get_world(self) -> Optional[int]:
+        # Unlike X11GameInstance (which mixes in PsUtilNetStat to detect
+        # the current world from the game process's network connections
+        # via its PID -- see runekit/game/psutil_mixins.py), there is no
+        # PID available here: the ScreenCast portal's WINDOW picker never
+        # exposes the picked window's owning process id to the caller, by
+        # design (it's meant to work for sandboxed/Flatpak clients too,
+        # which may not even share the caller's PID namespace). Without a
+        # PID, PsUtilNetStat's psutil.Process(pid).connections() lookup is
+        # not possible. This is an accepted Wayland limitation (see
+        # ROADMAP.md Phase 6/Non-goals) -- alt1.currentWorld will report
+        # unknown (-1) for Alt1 apps running against this backend, rather
+        # than crashing.
         return None
 
     def _ensure_capture_started(self):
@@ -328,6 +346,10 @@ class WaylandGameInstance(GameInstance):
             self._overlay_disconnect()
             self._overlay_disconnect = None
 
+        for script in list(self._app_window_keep_above_scripts.values()):
+            script.unload()
+        self._app_window_keep_above_scripts.clear()
+
         self._hotkey_session.close()
 
         if self._capture_pipeline is not None:
@@ -345,3 +367,65 @@ class WaylandGameInstance(GameInstance):
 
     def get_overlay_area(self) -> QGraphicsItem:
         return self.overlay
+
+    def keep_window_above(self, window: QWindow):
+        """Load a KWin always-on-top script for an Alt1 app window, the
+        same mechanism WaylandDesktopWideOverlay uses for the overlay
+        window (see overlay.py/kwin_script.py) -- necessary because
+        Qt.WindowType.WindowStaysOnTopHint (what AppWindow already sets,
+        see runekit/app/view/window.py) is known-unreliable under
+        KWin/Wayland (confirmed in ROADMAP.md Phase 5's spike). See
+        ROADMAP.md Phase 6.
+
+        Reuses the same one-time, QSettings-remembered consent as the
+        overlay (wayland/kwinKeepAboveConsent, see kwin_script.py) rather
+        than prompting again per app window -- from the user's
+        perspective this is the same "let RuneKit load a KWin script"
+        grant already asked about when the overlay was set up.
+
+        KWin matches by caption, not Wayland app_id (see kwin_script.py's
+        module docstring). AppWindow already sets a real title (the app's
+        display name) before calling this, so that's reused as-is -- if
+        two windows of the same app happen to share that title, both
+        legitimately want keepAbove=true, so matching by that shared
+        title is correct, not a bug. Only synthesizes a fallback title
+        (unlikely in practice) if the window somehow has none yet.
+
+        Returns a zero-arg callable that unloads the script; the caller
+        (AppWindow) is expected to invoke it when the window closes.
+        Returns None if consent was declined or loading failed (logged as
+        a warning) -- the window still has the base Qt flag, just not the
+        KWin-script reinforcement.
+        """
+        if load_keep_above_consent() is not True:
+            # Consent is asked once, for the overlay (see
+            # WaylandDesktopWideOverlay.setup_keep_above()). If the user
+            # declined or hasn't been asked yet (e.g. no window has been
+            # picked/no overlay set up yet), don't load a script here
+            # either -- degrade gracefully to the base Qt flag alone.
+            return None
+
+        title = window.title()
+        if not title:
+            title = f"__runekit_wayland_app_{id(window)}__"
+            window.setTitle(title)
+
+        script = KeepAboveKWinScript(title)
+        try:
+            script.load_and_start()
+        except KWinScriptError as exc:
+            self.logger.warning(
+                "Could not load KWin always-on-top script for app window "
+                "%r: %s. Window may not stay above the game reliably.",
+                title,
+                exc,
+            )
+            return None
+
+        self._app_window_keep_above_scripts[id(window)] = script
+
+        def _unload():
+            self._app_window_keep_above_scripts.pop(id(window), None)
+            script.unload()
+
+        return _unload

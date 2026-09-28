@@ -1,0 +1,73 @@
+INFO:runekit.game:Detected Wayland session, using WaylandGameManager
+DEBUG:runekit.game.overlay.WaylandDesktopWideOverlay:Skipping check_compatibility() black-screen self-test on Wayland (QGuiApplication.primaryScreen().grabWindow(0) does not work under Wayland QPA)
+DEBUG:runekit.game.wayland.kwin_script.KeepAboveKWinScript:Wrote temp KWin script: /tmp/runekit_keepabove_f9io3vuf.js
+DEBUG:runekit.game.wayland.kwin_script.KeepAboveKWinScript:loadScript returned script id: 10
+INFO:runekit.game.wayland.kwin_script.KeepAboveKWinScript:Loaded KWin always-on-top script for window title '__runekit_wayland_overlay__' (plugin=runekit-keepabove-1a73ea4d)
+QSystemTrayIcon::setVisible: No Icon set
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): runeapps.org:443
+DEBUG:urllib3.connectionpool:https://runeapps.org:443 "GET /apps/alt1/afkscape/appconfig.json HTTP/1.1" 200 517
+DEBUG:runekit.game.wayland.portal.ScreenCastSession:Calling CreateSession
+DEBUG:runekit.game.wayland.portal.ScreenCastSession:ScreenCast session created: /org/freedesktop/portal/desktop/session/1_4031/runekit_session_131286210f3f
+DEBUG:runekit.game.wayland.portal.ScreenCastSession:Using persisted restore_token, picker should not prompt
+DEBUG:runekit.game.wayland.portal.ScreenCastSession:Persisted new restore_token
+INFO:runekit.game.wayland.portal.ScreenCastSession:Stream properties did not include a size (this is common for WINDOW-type streams on KWin); size will be derived from the first captured frame instead
+DEBUG:runekit.game.wayland.portal.ScreenCastSession:Calling OpenPipeWireRemote
+DEBUG:runekit.game.wayland.capture.PipeWireCapture:Starting Gst pipeline: pipewiresrc fd=12 path=81 ! videoconvert ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true
+DEBUG:runekit.game.wayland.capture.PipeWireCapture:Pipeline state change result: (<StateChangeReturn.SUCCESS: 1>, state=<State.PLAYING: 4>, pending=<State.VOID_PENDING: 0>)
+DEBUG:runekit.game.wayland.instance.WaylandGameInstance:Resolved window size from captured frame: 2560x1394
+DEBUG:runekit.game.wayland.globalshortcuts.GlobalShortcutsSession:Calling CreateSession
+DEBUG:runekit.game.wayland.globalshortcuts.GlobalShortcutsSession:GlobalShortcuts session created: /org/freedesktop/portal/desktop/session/1_4031/runekit_session_f7fe850779b9
+DEBUG:runekit.game.wayland.globalshortcuts.GlobalShortcutsSession:Calling BindShortcuts (requesting id='runekit-alt1')
+INFO:runekit.game.wayland.globalshortcuts.GlobalShortcutsSession:Wayland Alt+1 hotkey bound via GlobalShortcuts portal
+INFO:runekit.game.wayland.manager.WaylandGameManager:Picked Wayland window, instance id 1
+ERROR:root:Failed to launch app
+Traceback (most recent call last):
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/manual_validate_integration.py", line 119, in main
+    game_app = host.launch_app_from_url(app_url)
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/host/host.py", line 50, in launch_app_from_url
+    return self.launch_app(app_id(manifest_url), manifest)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/host/host.py", line 95, in launch_app
+    window = app.get_window()
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/app.py", line 46, in get_window
+    self.window = AppWindow(app=self, **kwargs)
+                  ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/view/window.py", line 18, in __init__
+    super().__init__(**kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/view/browser_window.py", line 66, in __init__
+    self._setup_browser()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/view/browser_window.py", line 78, in _setup_browser
+    self.browser.setPage(self.get_page())
+                         ~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/view/browser_window.py", line 81, in get_page
+    page = self.page_class(self.app.get_web_profile(), self.browser)
+                           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/app.py", line 66, in get_web_profile
+    self.web_profile = WebProfile(app=self, parent=self.window)
+                       ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/browser/profile.py", line 26, in __init__
+    self._insert_scheme_handlers()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/browser/profile.py", line 40, in _insert_scheme_handlers
+    api=self.app.get_api(),
+        ~~~~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/app/app.py", line 55, in get_api
+    self.alt1api = Alt1Api(app=self, parent=self.window)
+                   ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/browser/api.py", line 78, in __init__
+    self._game_scaling = self.app.game_instance.get_scaling()
+                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/var/home/JDan/Projects/Python/RuneKit-Reforged/runekit/game/wayland/instance.py", line 243, in get_scaling
+    return screen.devicePixelRatio() if screen else 1.0
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+RuntimeError: Internal C++ object (PySide6.QtGui.QScreen) already deleted.
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+DEBUG:runekit.game.wayland.kwin_script.KeepAboveKWinScript:Unloaded KWin script runekit-keepabove-1a73ea4d
+Initializing QtWebEngine...
+Creating GameManager via get_platform_manager() (production path)...
+
+Launching app: https://runeapps.org/apps/alt1/afkscape/appconfig.json
+(KWin's window picker and/or the overlay consent dialog may prompt now)
+

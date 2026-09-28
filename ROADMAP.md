@@ -10,9 +10,10 @@ KDE Plasma Wayland machine).
 Phase 5 complete (desktop-wide overlay implemented via Qt window flags + a
 runtime KWin script over org.kde.kwin.Scripting, no pywayland needed;
 validated end-to-end on a real KDE Plasma Wayland machine).
-Phase 6 (integration & regression) implemented -- extends the Phase 5
+Phase 6 complete (integration & regression: extends the Phase 5
 always-on-top KWin script to Alt1 app windows themselves, not just the
-overlay -- pending real-machine validation.
+overlay; validated end-to-end on a real KDE Plasma Wayland machine, no
+X11 regressions).
 Target: KDE Plasma (KWin) on Wayland, additive to existing X11 support
 
 ## Background
@@ -667,9 +668,7 @@ below for the full investigation trail.
   fullscreen window, click-through, and — after the Ctrl+C fix above —
   clean shutdown/re-run behavior). **Phase 5 is complete.**
 
-### Phase 6 — Integration & regression
-
-**Implementation status: code written, pending real-machine validation.**
+### Phase 6 — Integration & regression ✅ COMPLETE
 
 Most of `Host`/`App`/UI (`runekit/app/app.py`, `runekit/app/view/*`,
 `runekit/ui/game_snap.py`, `runekit/browser/*`) already worked against the
@@ -810,14 +809,34 @@ Phase 3. This phase closes the remaining gaps found by auditing every
   `:/runekit/browser/alt1.js` via `QFile` succeeds where it previously
   failed.
 
-**Pending:** re-run `manual_validate_integration.py` on the Bazzite/KDE
-Plasma Wayland machine (with `poetry run make dev` run first, per the
-updated docstring, and pulling this fix) to confirm both fixes above
-resolve the crashes, then continue through the rest of that script's
-manual-check list (app window opens, stays above the game window incl.
-fullscreen, overlay/hotkey still work, `runekit.log` has no other
-unexpected errors, clean shutdown). Report back GO/NO-GO so this phase
-can be marked complete.
+**Real-machine validation: GO.** Re-ran `manual_validate_integration.py`
+on the Bazzite/KDE Plasma Wayland machine after the two fixes above
+(`poetry run make dev` run first, per the updated docstring): the app
+launched and loaded successfully with no crash, the app window stayed
+above the picked window, the overlay and Alt+1 hotkey continued working
+alongside it, `alt1.currentWorld` degraded gracefully rather than
+crashing, and shutdown was clean with no unexpected errors in
+`runekit.log`. (Always-on-top against a *fullscreen* window specifically
+was not re-tested for the app window in this pass -- deferred as
+low-risk, since it reuses the exact same `KeepAboveKWinScript` mechanism
+Phase 5 already validated GO against a fullscreen window for the
+overlay.)
+
+**Known gap (tracked, not blocking):** `WaylandGameManager.repick_window()`
+only discards the current instance/`restore_token` and emits
+`instance_removed` -- it does not itself re-trigger the KWin picker. The
+next picker prompt only actually appears lazily, on the next
+`get_instances()`/`get_active_instance()` call (normally triggered by
+launching an app via `Host.launch_app()`), so clicking the tray's
+"Re-pick game window" action gives no immediate visual feedback until an
+app is next launched. Exiting and restarting `main.py` after using this
+action does correctly re-prompt (the persisted `restore_token` is gone),
+so the feature is not entirely broken, just has a UX gap for immediate
+feedback. Left as a follow-up rather than fixed now, since it's an
+existing Phase 3 behavior (not something Phase 6 introduced) and doesn't
+block Phase 6's own scope.
+
+**Phase 6 is complete.**
 
 ### Phase 7 — Packaging
 

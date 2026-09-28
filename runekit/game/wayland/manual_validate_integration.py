@@ -20,6 +20,14 @@ Setup (one-time, on the Bazzite/KDE Plasma Wayland machine):
     pip install --user PyGObject
     # System requirement: xdg-desktop-portal + xdg-desktop-portal-kde
     # running (already required by Phases 2-5).
+    # Also required (unlike Phases 2-5's scripts): runekit/_resources.py
+    # must exist -- this script goes through the real WebProfile/browser
+    # code path, which loads compiled Qt resources (:/runekit/browser/
+    # alt1.js, etc.) that only exist after building them:
+    #     poetry run make dev
+    # (Without this, WebProfile._insert_alt1_api() raises OSError trying
+    # to open :/runekit/browser/alt1.js -- this bit the first real-machine
+    # run of this script.)
 
 Run (defaults to the AFKScape example app from README.md):
     python -m runekit.game.wayland.manual_validate_integration
@@ -80,6 +88,7 @@ import sys
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 
+import runekit._resources  # noqa: F401 -- registers Qt resources (:/runekit/...), see runekit/main.py
 from runekit import browser
 from runekit.game import get_platform_manager
 from runekit.host import Host

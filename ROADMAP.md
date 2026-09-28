@@ -788,12 +788,36 @@ Phase 3. This phase closes the remaining gaps found by auditing every
   screen-only Qt smoke test confirming both the overlay-skip logic and
   the `RuntimeError` fallback behave correctly.
 
+- **Fix note (script-only, found on the second real-machine run of
+  `manual_validate_integration.py`): app launch failed with a plain
+  `OSError` raised from `WebProfile._insert_alt1_api()`
+  (`runekit/browser/profile.py`).** Not a Wayland-backend bug: that
+  method loads compiled Qt resources (`:/runekit/browser/alt1.js`, etc.)
+  registered by `runekit/_resources.py`, a generated file (built by
+  `pyside6-rcc resources.qrc -o runekit/_resources.py` via the
+  `Makefile`'s `dev` target) that `runekit/main.py` already imports
+  unconditionally at startup -- but `manual_validate_integration.py`
+  never did, since it hand-assembles the `QApplication`/`Host` setup
+  instead of calling `runekit.main.main()`. **Fixed** by adding `import
+  runekit._resources` to the script, and documented the
+  `poetry run make dev` prerequisite in its module docstring (this
+  project has no automated test suite, so this is the same kind of
+  environment-setup gotcha the Phase 0-5 scripts' docstrings already
+  call out for their own dependencies). Verified locally (this dev
+  environment lacks a real Wayland session, but `pyside6-rcc` and Qt's
+  resource system are platform-independent): after generating
+  `runekit/_resources.py` and importing it, opening
+  `:/runekit/browser/alt1.js` via `QFile` succeeds where it previously
+  failed.
+
 **Pending:** re-run `manual_validate_integration.py` on the Bazzite/KDE
-Plasma Wayland machine to confirm the fix above resolves the crash, then
-continue through the rest of that script's manual-check list (app window
-opens, stays above the game window incl. fullscreen, overlay/hotkey still
-work, `runekit.log` has no other unexpected errors, clean shutdown).
-Report back GO/NO-GO so this phase can be marked complete.
+Plasma Wayland machine (with `poetry run make dev` run first, per the
+updated docstring, and pulling this fix) to confirm both fixes above
+resolve the crashes, then continue through the rest of that script's
+manual-check list (app window opens, stays above the game window incl.
+fullscreen, overlay/hotkey still work, `runekit.log` has no other
+unexpected errors, clean shutdown). Report back GO/NO-GO so this phase
+can be marked complete.
 
 ### Phase 7 — Packaging
 

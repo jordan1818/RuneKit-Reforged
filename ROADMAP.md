@@ -755,13 +755,45 @@ Phase 3. This phase closes the remaining gaps found by auditing every
   `None`, and `X11GameInstance`/`QuartzGameInstance` do not override it,
   so `AppWindow._setup_keep_above()` is a harmless no-op on X11/macOS.
 
-**Pending:** real-machine validation on the Bazzite/KDE Plasma Wayland
-machine via `manual_validate_integration.py`, launching a real Alt1 app
-end-to-end and confirming the app window stays above the game window
-(including fullscreen), the overlay/hotkey still work together with it,
-and no regressions appear in `runekit.log`. See that script's docstring
-for the full manual-check list. Report back GO/NO-GO so this phase can be
-marked complete.
+- **Fix note (found during first real-machine run of
+  `manual_validate_integration.py`): app launch crashed inside
+  `Alt1Api.__init__` before any RuneKit window was ever shown.** The
+  traceback pointed at `WaylandGameInstance.get_scaling()` ->
+  `screen.devicePixelRatio()` raising `RuntimeError: Internal C++ object
+  (PySide6.QtGui.QScreen) already deleted`. Root cause: `Alt1Api.__init__`
+  (`runekit/browser/api.py`) calls `get_scaling()` before `AppWindow` is
+  shown, so at that point the *only* visible top-level RuneKit window is
+  the desktop-wide overlay (`WaylandDesktopWideOverlay`, shown immediately
+  on `WaylandGameManager` construction since Phase 5, spanning the full
+  virtual desktop across all monitors for the app's entire lifetime).
+  `get_scaling()`'s `_get_visible_window_screen()` fallback was written
+  assuming "no RuneKit window is visible yet" before any app launch (see
+  its original docstring) -- an assumption Phase 5 silently broke, since
+  it now always finds the overlay first. Querying `.screen()` on a window
+  intentionally spanning this reference machine's 3-display (2 real
+  monitors + a 4K dummy HDMI output) setup returned a `QScreen` whose
+  underlying C++ object was already torn down -- consistent with the
+  upstream kscreen/KWin multi-monitor screen-list instability already
+  documented in Phase 3's `get_scaling()` notes. **Fixed** two ways: (1)
+  `_get_visible_window_screen()` (`runekit/game/wayland/instance.py`, now
+  an instance method instead of `@staticmethod` so it can reach
+  `self.manager.overlay`) explicitly skips the overlay's own
+  `windowHandle()`, restoring the intended "first *real app* window, else
+  `primaryScreen()`" fallback order; (2) `get_scaling()` wraps the
+  `devicePixelRatio()` call in `try/except RuntimeError`, logging a
+  warning and degrading to `1.0` as a safety net, since this is
+  best-effort geometry to begin with and the underlying multi-monitor
+  Wayland screen-list instability could plausibly resurface elsewhere.
+  Verified offline (no PyGObject/Wayland session needed) with a
+  screen-only Qt smoke test confirming both the overlay-skip logic and
+  the `RuntimeError` fallback behave correctly.
+
+**Pending:** re-run `manual_validate_integration.py` on the Bazzite/KDE
+Plasma Wayland machine to confirm the fix above resolves the crash, then
+continue through the rest of that script's manual-check list (app window
+opens, stays above the game window incl. fullscreen, overlay/hotkey still
+work, `runekit.log` has no other unexpected errors, clean shutdown).
+Report back GO/NO-GO so this phase can be marked complete.
 
 ### Phase 7 — Packaging
 

@@ -237,14 +237,59 @@ class WaylandGameInstance(GameInstance):
         # e.g. this GameManager/GameInstance's own headless bookkeeping),
         # a QWindow's screen is tracked reliably via real compositor
         # surface-enter/leave events. Falls back to primaryScreen() if no
-        # RuneKit window is visible yet (e.g. before any app is launched).
+        # RuneKit *app* window is visible yet (e.g. before any app is
+        # launched, or -- see _get_visible_window_screen()'s docstring --
+        # only the always-on desktop-wide overlay is visible).
         screen = self._get_visible_window_screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return 1.0
 
-        return screen.devicePixelRatio() if screen else 1.0
+        try:
+            return screen.devicePixelRatio()
+        except RuntimeError:
+            # Fix note (found during real-machine validation, ROADMAP.md
+            # Phase 6): on this reference machine's 3-display (2 real
+            # monitors + a 4K dummy HDMI output) setup, a QScreen picked
+            # here can have its underlying C++ object torn down out from
+            # under us (PySide6 raises "Internal C++ object ... already
+            # deleted" on the next access) -- consistent with the
+            # upstream kscreen/KWin multi-monitor screen-list instability
+            # already documented in ROADMAP.md Phase 3's get_scaling()
+            # notes. This is best-effort geometry to begin with, so
+            # degrade to 1.0 rather than crash the whole app launch (this
+            # crashed Alt1Api.__init__ before any RuneKit window was
+            # even shown).
+            self.logger.warning(
+                "Screen returned by _get_visible_window_screen()/"
+                "primaryScreen() was already deleted; falling back to 1.0"
+            )
+            return 1.0
 
-    @staticmethod
-    def _get_visible_window_screen():
+    def _get_visible_window_screen(self):
+        """Return the screen of a visible, *real* RuneKit app window, or
+        None if none exists yet.
+
+        Explicitly skips the manager's desktop-wide overlay window: since
+        ROADMAP.md Phase 5, WaylandDesktopWideOverlay is shown immediately
+        when WaylandGameManager is constructed and stays visible for the
+        app's entire lifetime, spanning the full virtual desktop across
+        all monitors -- so without this check, it would always be the
+        first (and often only) "visible top-level window" found below,
+        making the primaryScreen() fallback described in get_scaling()'s
+        docstring unreachable in practice. This bit real-machine
+        validation (ROADMAP.md Phase 6): querying the overlay's spanning
+        .screen() this way returned a QScreen whose underlying C++ object
+        had already been deleted, crashing Alt1Api.__init__ via
+        get_scaling() before any app window was even shown.
+        """
+        overlay_handle = None
+        overlay = getattr(self.manager, "overlay", None)
+        if overlay is not None:
+            overlay_handle = overlay.windowHandle()
+
         for window in QGuiApplication.topLevelWindows():
+            if window is overlay_handle:
+                continue
             if window.isVisible():
                 screen = window.screen()
                 if screen is not None:
